@@ -41,7 +41,7 @@ const VERSION_SHIFT: u32 = 76;
 const VARIANT_SHIFT: u32 = 62;
 
 const UUID_VERSION: u128 = 7;
-const UUID_VARIANT: u128 = 2;
+const UUID_VARIANT: u128 = 2; // 0b10
 
 pub fn generate() -> Result<String, SystemTimeError> {
     let timestamp_duration = SystemTime::now().duration_since(UNIX_EPOCH)?;
