@@ -27,30 +27,36 @@
 // rand_b:
 //     The final 62 bits of pseudorandom data to provide uniqueness as per Section 6.9 and/or an optional counter to guarantee additional monotonicity as per Section 6.2. Occupies bits 66 through 127 (octets 8-15).
 
-use crate::{V7_RANDOM_A_MAX, V7_RANDOM_B_MASK, V7_TIMESTAMP_MASK, print_bits};
 use rand::RngExt;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, SystemTimeError, UNIX_EPOCH};
 
-pub fn generate() -> String {
-    let timestamp_duration = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("v7::generate");
+const RANDOM_A_MASK: u128 = 0b00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000111111111111;
+const RANDOM_B_MASK: u128 = 0b00000000000000000000000000000000000000000000000000000000000000000011111111111111111111111111111111111111111111111111111111111111;
+const TIMESTAMP_MASK: u128 =
+    0b00000000000000000000000000000000000000000000000000000000000000000000000000000000111111111111111111111111111111111111111111111111;
 
-    let _timestamp = timestamp_duration.as_millis();
-    let _unix_ts_ms = _timestamp & V7_TIMESTAMP_MASK;
-    let _random_a = generate_random_a(timestamp_duration);
-    let _random_b = rand::rng().random::<u64>() & V7_RANDOM_B_MASK;
+const TIMESTAMP_SHIFT: u128 = 80;
+const RANDOM_A_SHIFT: u128 = 64;
+const VERSION_SHIFT: u32 = 76;
+const VARIANT_SHIFT: u32 = 62;
 
-    let uuid: u128 = 0;
+const UUID_VERSION: u128 = 7;
+const UUID_VARIANT: u128 = 2;
 
-    println!("unix_ts_ms = {_unix_ts_ms}");
-    print_bits(_unix_ts_ms);
-    println!("random_a = {_random_a}");
-    print_bits(_random_a);
-    println!("random_b = {_random_b}");
-    print_bits(_random_b);
+pub fn generate() -> Result<String, SystemTimeError> {
+    let timestamp_duration = SystemTime::now().duration_since(UNIX_EPOCH)?;
 
-    "".to_string()
+    let unix_ts_ms = timestamp_duration.as_millis() & TIMESTAMP_MASK;
+    let random_a = generate_random_a(timestamp_duration) as u128 & RANDOM_A_MASK;
+    let random_b = rand::rng().random::<u64>() as u128 & RANDOM_B_MASK;
+
+    let uuid = (unix_ts_ms << TIMESTAMP_SHIFT)
+        | (UUID_VERSION << VERSION_SHIFT)
+        | (random_a << RANDOM_A_SHIFT)
+        | (UUID_VARIANT << VARIANT_SHIFT)
+        | random_b;
+
+    Ok(crate::add_dashes(uuid))
 }
 
 // https://www.rfc-editor.org/info/rfc9562/#section-6.2
@@ -94,11 +100,9 @@ pub fn generate() -> String {
 //    immediately follow the timestamp. Then, if any bits are to be used as a clock sequence, they
 //    would follow next.
 fn generate_random_a(duration: Duration) -> u16 {
-    // Scale sub-millisecond precision into the random_a range.
     let sub_ms_nanos = (duration.subsec_nanos() % 1_000_000) as u64;
-    let extra_precision = V7_RANDOM_A_MAX * sub_ms_nanos;
+    let extra_precision = (RANDOM_A_MASK as u64) * sub_ms_nanos;
 
-    // random_a
     (extra_precision / 1_000_000) as u16
 }
 
@@ -108,7 +112,8 @@ mod test {
 
     #[test]
     fn it_works() {
-        let _uuid = crate::v7::generate();
+        let uuid = crate::v7::generate().unwrap();
+        println!("\n\n\n\nIT_WORKS!!\n{uuid}");
     }
 
     #[test]
@@ -122,10 +127,8 @@ mod test {
             .duration_since(UNIX_EPOCH)
             .unwrap();
 
-        let timestamp = duration.as_millis();
+        let _timestamp = duration.as_millis();
         let random_a = crate::v7::generate_random_a(duration);
-
-        println!("\ntimestamp = {timestamp}\nrandom_a = {random_a}\n");
 
         assert_eq!(
             expected, random_a,

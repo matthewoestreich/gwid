@@ -27,13 +27,15 @@
 // random_c:
 //     The final 62 bits of the layout immediately following the var field to be filled with random data as per Section 6.9. Occupies bits 66 through 127 (octets 8-15).
 
-use crate::{VARIANT_MASK, VERSION_MASK};
 use rand::RngExt as _;
+
+const V4_VERSION_MASK: u128 = 0b00000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000000000000000000;
+const V4_VARIANT_MASK: u128 = 0b00000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000;
 
 pub fn generate() -> String {
     let mut uuid: u128 = rand::rng().random();
-    uuid = (uuid & !VERSION_MASK) | VERSION_MASK;
-    uuid = (uuid & !VARIANT_MASK) | VARIANT_MASK;
+    uuid = (uuid & !V4_VERSION_MASK) | V4_VERSION_MASK;
+    uuid = (uuid & !V4_VARIANT_MASK) | V4_VARIANT_MASK;
     crate::add_dashes(uuid)
 }
 
