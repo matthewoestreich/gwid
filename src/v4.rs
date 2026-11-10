@@ -40,9 +40,10 @@ pub fn generate() -> String {
     generate_with(rand::rng().random::<u128>())
 }
 
-fn generate_with(rand: u128) -> String {
-    let uuid =
-        (rand & !V4_VERSION_BITS_MASK & !V4_VARIANT_BITS_MASK) | V4_VERSION_MASK | V4_VARIANT_MASK;
+fn generate_with(random_bits: u128) -> String {
+    let uuid = (random_bits & !V4_VERSION_BITS_MASK & !V4_VARIANT_BITS_MASK)
+        | V4_VERSION_MASK
+        | V4_VARIANT_MASK;
 
     crate::add_dashes(uuid)
 }
