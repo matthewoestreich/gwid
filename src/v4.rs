@@ -31,21 +31,112 @@
 
 use rand::RngExt as _;
 
-const V4_VERSION_MASK: u128 = 0b00000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000000000000000000;
-const V4_VARIANT_MASK: u128 = 0b00000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000;
+const V4_VERSION_MASK: u128      = 0b00000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000000000000000000;
+const V4_VERSION_BITS_MASK: u128 = 0b00000000000000000000000000000000000000000000000011110000000000000000000000000000000000000000000000000000000000000000000000000000;
+const V4_VARIANT_MASK: u128      = 0b00000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000;
+const V4_VARIANT_BITS_MASK: u128 = 0b00000000000000000000000000000000000000000000000000000000000000001100000000000000000000000000000000000000000000000000000000000000;
 
 pub fn generate() -> String {
-    let mut uuid: u128 = rand::rng().random();
-    uuid = (uuid & !V4_VERSION_MASK) | V4_VERSION_MASK;
-    uuid = (uuid & !V4_VARIANT_MASK) | V4_VARIANT_MASK;
+    generate_with(rand::rng().random::<u128>())
+}
+
+fn generate_with(rand: u128) -> String {
+    let uuid =
+        (rand & !V4_VERSION_BITS_MASK & !V4_VARIANT_BITS_MASK) | V4_VERSION_MASK | V4_VARIANT_MASK;
+
     crate::add_dashes(uuid)
 }
 
 #[cfg(test)]
 mod test {
+    use super::*;
+
     #[test]
     fn it_works() {
         let uuid = crate::v4::generate();
         println!("{uuid}");
+    }
+
+    #[test]
+    fn example_from_rfc() {
+        let expected_final_int =
+            u128::from_str_radix("919108f752d143209bacf847db4148a8", 16).unwrap();
+
+        let rand: u128 = 0b10010001100100010000100011110111010100101101000100110011001000000101101110101100111110000100011111011011010000010100100010101000;
+        let result = generate_with(rand).replace("-", "");
+        let result = u128::from_str_radix(&result, 16).unwrap();
+
+        assert_eq!(
+            result, expected_final_int,
+            "expected these to equal : expected={expected_final_int} got={result}"
+        );
+    }
+
+    #[test]
+    fn test_uuid_v4_length() {
+        let uuid = generate();
+        assert_eq!(uuid.len(), 36);
+    }
+
+    #[test]
+    fn test_uuid_v4_dash_positions() {
+        let uuid = generate();
+
+        for position in [8, 13, 18, 23] {
+            assert_eq!(uuid.as_bytes()[position], b'-');
+        }
+    }
+
+    #[test]
+    fn test_uuid_v4_version() {
+        let uuid = generate();
+
+        // Version is represented by the first nibble of the third group.
+        assert_eq!(uuid.as_bytes()[14], b'4');
+    }
+
+    #[test]
+    fn test_uuid_v4_variant() {
+        let uuid = generate();
+
+        // Variant must be 10xx in binary.
+        // Therefore, the first hex digit of the fourth group
+        // must be 8, 9, A, or B.
+        assert!(matches!(uuid.as_bytes()[19], b'8' | b'9' | b'a' | b'b'));
+    }
+
+    #[test]
+    fn test_uuid_v4_valid_hexadecimal() {
+        let uuid = generate();
+
+        let hex: String = uuid.chars().filter(|c| *c != '-').collect();
+
+        assert_eq!(hex.len(), 32);
+        assert!(u128::from_str_radix(&hex, 16).is_ok());
+    }
+
+    #[test]
+    fn test_uuid_v4_multiple_generations() {
+        for _ in 0..1_000 {
+            let uuid = generate();
+
+            let fourteen_bytes = uuid.as_bytes()[14];
+            let fourteen_expected = b'4';
+
+            let nineteen_bytes = uuid.as_bytes()[19];
+
+            assert_eq!(
+                fourteen_bytes, fourteen_expected,
+                "expected these to equal : '{fourteen_bytes}' != '{fourteen_expected}'",
+            );
+            assert!(
+                matches!(nineteen_bytes, b'8' | b'9' | b'a' | b'b'),
+                "expected match : '{nineteen_bytes}' != '{} | {} | {} | {}'",
+                b'8',
+                b'9',
+                b'a',
+                b'b'
+            );
+        }
     }
 }
