@@ -69,22 +69,22 @@ const UUID_VARIANT: u128 = 2; // 0b10
 const RANDOM_A_MAX_VALUE: u64 = 1 << 12;
 
 pub fn generate() -> Result<String, UUIDv7Error> {
-    let timestamp_duration = SystemTime::now().duration_since(UNIX_EPOCH)?;
+    let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?;
     let random_b = rand::rng().random::<u64>();
 
-    generate_with(timestamp_duration, random_b)
+    generate_with(timestamp, random_b)
 }
 
-fn generate_with(timestamp_duration: Duration, random_b: u64) -> Result<String, UUIDv7Error> {
-    let mut unix_ts_ms = timestamp_duration.as_millis() & TIMESTAMP_MASK;
-    let mut random_a = generate_random_a(timestamp_duration) as u128 & RANDOM_A_MASK;
+fn generate_with(timestamp: Duration, random_b: u64) -> Result<String, UUIDv7Error> {
+    let mut unix_ts_ms = timestamp.as_millis() & TIMESTAMP_MASK;
+    let mut random_a = derive_random_a(timestamp) as u128 & RANDOM_A_MASK;
     let mut random_b = random_b as u128 & RANDOM_B_MASK;
 
     let mut refs = MONOTONIC_REFS
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
 
-    ensure_monotonic(&mut unix_ts_ms, &mut random_a, &mut random_b, &mut refs)?;
+    ensure_monotonicity(&mut unix_ts_ms, &mut random_a, &mut random_b, &mut refs)?;
 
     let uuid = (unix_ts_ms << TIMESTAMP_SHIFT)
         | (UUID_VERSION << VERSION_SHIFT)
@@ -135,12 +135,12 @@ fn generate_with(timestamp_duration: Duration, random_b: u64) -> Result<String, 
 //    in conjunction with one of the other methods, where this additional time precision would
 //    immediately follow the timestamp. Then, if any bits are to be used as a clock sequence, they
 //    would follow next.
-fn generate_random_a(duration: Duration) -> u16 {
-    let sub_ms_nanos = (duration.subsec_nanos() % 1_000_000) as u64;
+fn derive_random_a(from_timestamp: Duration) -> u16 {
+    let sub_ms_nanos = (from_timestamp.subsec_nanos() % 1_000_000) as u64;
     ((RANDOM_A_MAX_VALUE * sub_ms_nanos) / 1_000_000) as u16
 }
 
-fn ensure_monotonic(
+fn ensure_monotonicity(
     unix_ts_ms: &mut u128,
     random_a: &mut u128,
     random_b: &mut u128,
@@ -254,7 +254,7 @@ mod test {
             .unwrap();
 
         let _timestamp = duration.as_millis();
-        let random_a = crate::v7::generate_random_a(duration);
+        let random_a = crate::v7::derive_random_a(duration);
 
         assert_eq!(
             expected, random_a,
@@ -316,9 +316,9 @@ mod test {
 
     #[test]
     fn random_a_uses_submillisecond_precision() {
-        assert_eq!(generate_random_a(Duration::from_nanos(0)), 0);
-        assert_eq!(generate_random_a(Duration::from_nanos(500_000)), 2048);
-        assert_eq!(generate_random_a(Duration::from_nanos(999_999)), 4095);
+        assert_eq!(derive_random_a(Duration::from_nanos(0)), 0);
+        assert_eq!(derive_random_a(Duration::from_nanos(500_000)), 2048);
+        assert_eq!(derive_random_a(Duration::from_nanos(999_999)), 4095);
     }
 
     #[test]
@@ -326,7 +326,7 @@ mod test {
         let mut previous = 0;
 
         for nanos in (1_000..1_000_000).step_by(1_000) {
-            let current = generate_random_a(Duration::from_nanos(nanos));
+            let current = derive_random_a(Duration::from_nanos(nanos));
             assert!(current >= previous);
             previous = current;
         }
@@ -344,7 +344,7 @@ mod test {
         let mut random_a = 100;
         let mut random_b = 150;
 
-        ensure_monotonic(&mut timestamp, &mut random_a, &mut random_b, &mut refs).unwrap();
+        ensure_monotonicity(&mut timestamp, &mut random_a, &mut random_b, &mut refs).unwrap();
 
         assert_eq!(timestamp, 100);
         assert_eq!(random_a, 100);
@@ -363,7 +363,7 @@ mod test {
         let mut random_a = 101;
         let mut random_b = 50;
 
-        ensure_monotonic(&mut timestamp, &mut random_a, &mut random_b, &mut refs).unwrap();
+        ensure_monotonicity(&mut timestamp, &mut random_a, &mut random_b, &mut refs).unwrap();
 
         assert_eq!(random_a, 101);
         assert_eq!(random_b, 50);
@@ -381,7 +381,7 @@ mod test {
         let mut random_a = 50;
         let mut random_b = 50;
 
-        ensure_monotonic(&mut timestamp, &mut random_a, &mut random_b, &mut refs).unwrap();
+        ensure_monotonicity(&mut timestamp, &mut random_a, &mut random_b, &mut refs).unwrap();
 
         assert_eq!(random_a, 100);
         assert_eq!(random_b, 201);
@@ -399,7 +399,7 @@ mod test {
         let mut random_a = 50;
         let mut random_b = 50;
 
-        ensure_monotonic(&mut timestamp, &mut random_a, &mut random_b, &mut refs).unwrap();
+        ensure_monotonicity(&mut timestamp, &mut random_a, &mut random_b, &mut refs).unwrap();
 
         assert_eq!(timestamp, 100);
         assert_eq!(random_a, 100);
@@ -418,7 +418,7 @@ mod test {
         let mut random_a = 10;
         let mut random_b = 20;
 
-        ensure_monotonic(&mut timestamp, &mut random_a, &mut random_b, &mut refs).unwrap();
+        ensure_monotonicity(&mut timestamp, &mut random_a, &mut random_b, &mut refs).unwrap();
 
         assert_eq!(timestamp, 101);
         assert_eq!(random_a, 10);
@@ -437,7 +437,7 @@ mod test {
         let mut random_a = 100;
         let mut random_b = RANDOM_B_MASK;
 
-        let result = ensure_monotonic(&mut timestamp, &mut random_a, &mut random_b, &mut refs);
+        let result = ensure_monotonicity(&mut timestamp, &mut random_a, &mut random_b, &mut refs);
 
         assert!(matches!(result, Err(UUIDv7Error::RandomFieldExhausted)));
     }
