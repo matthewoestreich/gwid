@@ -3,21 +3,21 @@ use std::fmt::Binary;
 pub mod v4;
 pub mod v7;
 
-const FIRST_DASH_INDEX: usize = 8;
-const SECOND_DASH_INDEX: usize = 12;
-const THIRD_DASH_INDEX: usize = 16;
-const FOURTH_DASH_INDEX: usize = 20;
+const FIRST_HYPHEN_INDEX: usize = 8;
+const SECOND_HYPHEN_INDEX: usize = 12;
+const THIRD_HYPHEN_INDEX: usize = 16;
+const FOURTH_HYPHEN_INDEX: usize = 20;
 
 pub(crate) fn add_hyphens(uuid: u128) -> String {
     let uuid = format!("{uuid:032x}");
 
     format!(
         "{}-{}-{}-{}-{}",
-        &uuid[..FIRST_DASH_INDEX],
-        &uuid[FIRST_DASH_INDEX..SECOND_DASH_INDEX],
-        &uuid[SECOND_DASH_INDEX..THIRD_DASH_INDEX],
-        &uuid[THIRD_DASH_INDEX..FOURTH_DASH_INDEX],
-        &uuid[FOURTH_DASH_INDEX..]
+        &uuid[..FIRST_HYPHEN_INDEX],
+        &uuid[FIRST_HYPHEN_INDEX..SECOND_HYPHEN_INDEX],
+        &uuid[SECOND_HYPHEN_INDEX..THIRD_HYPHEN_INDEX],
+        &uuid[THIRD_HYPHEN_INDEX..FOURTH_HYPHEN_INDEX],
+        &uuid[FOURTH_HYPHEN_INDEX..]
     )
 }
 
