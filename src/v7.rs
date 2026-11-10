@@ -92,7 +92,7 @@ fn generate_with(timestamp_duration: Duration, random_b: u64) -> Result<String, 
         | (UUID_VARIANT << VARIANT_SHIFT)
         | random_b;
 
-    Ok(crate::add_dashes(uuid))
+    Ok(crate::add_hyphens(uuid))
 }
 
 // https://www.rfc-editor.org/info/rfc9562/#section-6.2

@@ -8,7 +8,7 @@ const SECOND_DASH_INDEX: usize = 12;
 const THIRD_DASH_INDEX: usize = 16;
 const FOURTH_DASH_INDEX: usize = 20;
 
-pub(crate) fn add_dashes(uuid: u128) -> String {
+pub(crate) fn add_hyphens(uuid: u128) -> String {
     let uuid = format!("{uuid:032x}");
 
     format!(

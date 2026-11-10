@@ -45,7 +45,7 @@ fn generate_with(random_bits: u128) -> String {
         | V4_VERSION_MASK
         | V4_VARIANT_MASK;
 
-    crate::add_dashes(uuid)
+    crate::add_hyphens(uuid)
 }
 
 #[cfg(test)]
