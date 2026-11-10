@@ -60,16 +60,12 @@ mod test {
 
     #[test]
     fn example_from_rfc() {
-        let expected_final_int =
-            u128::from_str_radix("919108f752d143209bacf847db4148a8", 16).unwrap();
-
+        let expected = "919108f752d143209bacf847db4148a8";
         let rand: u128 = 0b10010001100100010000100011110111010100101101000100110011001000000101101110101100111110000100011111011011010000010100100010101000;
         let result = generate_with(rand).replace("-", "");
-        let result = u128::from_str_radix(&result, 16).unwrap();
-
         assert_eq!(
-            result, expected_final_int,
-            "expected these to equal : expected={expected_final_int} got={result}"
+            result, expected,
+            "expected these to equal : expected={expected} got={result}"
         );
     }
 
