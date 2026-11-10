@@ -68,6 +68,23 @@ const UUID_VARIANT: u128 = 2; // 0b10
 
 const RANDOM_A_MAX_VALUE: u64 = 1 << 12;
 
+/// Generates a UUIDv7 using the current Unix timestamp and a cryptographically
+/// secure random number generator.
+///
+/// The 48-bit timestamp is combined with sub-millisecond timestamp precision
+/// to populate the 12-bit `rand_a` field, following Method 3 described in
+/// [RFC 9562, Section 6.2](https://www.rfc-editor.org/rfc/rfc9562.html#section-6.2).
+/// The remaining 62 bits are populated using cryptographically secure randomness.
+///
+/// A process-wide monotonic state ensures that generated UUIDs are strictly
+/// increasing, even when multiple threads generate UUIDs concurrently or the
+/// system clock moves backwards.
+///
+/// # Errors
+///
+/// Returns [UUIDv7Error::SystemTimeError] if the system time is earlier than
+/// [UNIX_EPOCH], or [UUIDv7Error::RandomFieldExhausted] if the random field
+/// cannot be advanced while preserving monotonicity.
 pub fn generate() -> Result<String, UUIDv7Error> {
     let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?;
     let random_b = rand::rng().random::<u64>();
