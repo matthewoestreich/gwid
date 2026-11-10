@@ -27,7 +27,8 @@
 // rand_b:
 //     The final 62 bits of pseudorandom data to provide uniqueness as per Section 6.9 and/or an optional counter to guarantee additional monotonicity as per Section 6.2. Occupies bits 66 through 127 (octets 8-15).
 
-use crate::V7_RANDOM_A_MAX;
+use crate::{V7_RANDOM_A_MAX, V7_RANDOM_B_MASK, V7_TIMESTAMP_MASK, print_bits};
+use rand::RngExt;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 pub fn generate() -> String {
@@ -36,7 +37,18 @@ pub fn generate() -> String {
         .expect("v7::generate");
 
     let _timestamp = timestamp_duration.as_millis();
+    let _unix_ts_ms = _timestamp & V7_TIMESTAMP_MASK;
     let _random_a = generate_random_a(timestamp_duration);
+    let _random_b = rand::rng().random::<u64>() & V7_RANDOM_B_MASK;
+
+    let uuid: u128 = 0;
+
+    println!("unix_ts_ms = {_unix_ts_ms}");
+    print_bits(_unix_ts_ms);
+    println!("random_a = {_random_a}");
+    print_bits(_random_a);
+    println!("random_b = {_random_b}");
+    print_bits(_random_b);
 
     "".to_string()
 }
