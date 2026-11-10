@@ -30,7 +30,28 @@
 //     The final 62 bits of pseudorandom data to provide uniqueness as per Section 6.9 and/or an optional counter to guarantee additional monotonicity as per Section 6.2. Occupies bits 66 through 127 (octets 8-15).
 
 use rand::RngExt;
-use std::time::{Duration, SystemTime, SystemTimeError, UNIX_EPOCH};
+use std::{
+    error,
+    fmt::{Display, Formatter, Result as FmtResult},
+    sync::{LazyLock, Mutex},
+    time::{Duration, SystemTime, SystemTimeError, UNIX_EPOCH},
+};
+
+/// To hold global state for monotonic id generation
+pub(crate) struct MonotonicRefs {
+    pub(crate) last_timestamp: u128,
+    pub(crate) last_random_a: u128,
+    pub(crate) last_random_b: u128,
+}
+
+/// Global monotonic references
+pub(crate) static MONOTONIC_REFS: LazyLock<Mutex<MonotonicRefs>> = LazyLock::new(|| {
+    Mutex::new(MonotonicRefs {
+        last_timestamp: 0,
+        last_random_a: 0,
+        last_random_b: 0,
+    })
+});
 
 const RANDOM_A_MASK: u128 = 0b00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000111111111111;
 const RANDOM_B_MASK: u128 = 0b00000000000000000000000000000000000000000000000000000000000000000011111111111111111111111111111111111111111111111111111111111111;
@@ -47,17 +68,23 @@ const UUID_VARIANT: u128 = 2; // 0b10
 
 const RANDOM_A_MAX_VALUE: u64 = 1 << 12;
 
-pub fn generate() -> Result<String, SystemTimeError> {
+pub fn generate() -> Result<String, UUIDv7Error> {
     let timestamp_duration = SystemTime::now().duration_since(UNIX_EPOCH)?;
     let random_b = rand::rng().random::<u64>();
 
-    Ok(generate_with(timestamp_duration, random_b))
+    generate_with(timestamp_duration, random_b)
 }
 
-fn generate_with(timestamp_duration: Duration, random_b: u64) -> String {
-    let unix_ts_ms = timestamp_duration.as_millis() & TIMESTAMP_MASK;
-    let random_a = generate_random_a(timestamp_duration) as u128 & RANDOM_A_MASK;
-    let random_b = random_b as u128 & RANDOM_B_MASK;
+fn generate_with(timestamp_duration: Duration, random_b: u64) -> Result<String, UUIDv7Error> {
+    let mut unix_ts_ms = timestamp_duration.as_millis() & TIMESTAMP_MASK;
+    let mut random_a = generate_random_a(timestamp_duration) as u128 & RANDOM_A_MASK;
+    let mut random_b = random_b as u128 & RANDOM_B_MASK;
+
+    let mut refs = MONOTONIC_REFS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+
+    ensure_monotonic(&mut unix_ts_ms, &mut random_a, &mut random_b, &mut refs)?;
 
     let uuid = (unix_ts_ms << TIMESTAMP_SHIFT)
         | (UUID_VERSION << VERSION_SHIFT)
@@ -65,7 +92,7 @@ fn generate_with(timestamp_duration: Duration, random_b: u64) -> String {
         | (UUID_VARIANT << VARIANT_SHIFT)
         | random_b;
 
-    crate::add_dashes(uuid)
+    Ok(crate::add_dashes(uuid))
 }
 
 // https://www.rfc-editor.org/info/rfc9562/#section-6.2
@@ -110,9 +137,68 @@ fn generate_with(timestamp_duration: Duration, random_b: u64) -> String {
 //    would follow next.
 fn generate_random_a(duration: Duration) -> u16 {
     let sub_ms_nanos = (duration.subsec_nanos() % 1_000_000) as u64;
-    let extra_precision = RANDOM_A_MAX_VALUE * sub_ms_nanos;
+    ((RANDOM_A_MAX_VALUE * sub_ms_nanos) / 1_000_000) as u16
+}
 
-    (extra_precision / 1_000_000) as u16
+fn ensure_monotonic(
+    unix_ts_ms: &mut u128,
+    random_a: &mut u128,
+    random_b: &mut u128,
+    refs: &mut MonotonicRefs,
+) -> Result<(), UUIDv7Error> {
+    *unix_ts_ms = refs.last_timestamp.max(*unix_ts_ms);
+
+    if *unix_ts_ms == refs.last_timestamp {
+        *random_a = refs.last_random_a.max(*random_a);
+
+        if *random_a == refs.last_random_a && *random_b <= refs.last_random_b {
+            if refs.last_random_b == RANDOM_B_MASK {
+                return Err(UUIDv7Error::RandomFieldExhausted);
+            }
+
+            *random_b = refs.last_random_b + 1;
+        }
+    }
+
+    refs.last_timestamp = *unix_ts_ms;
+    refs.last_random_a = *random_a;
+    refs.last_random_b = *random_b;
+
+    Ok(())
+}
+
+#[derive(Debug)]
+pub enum UUIDv7Error {
+    RandomFieldExhausted,
+    SystemTimeError(SystemTimeError),
+}
+
+impl Display for UUIDv7Error {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        use UUIDv7Error::*;
+        match self {
+            RandomFieldExhausted => write!(
+                f,
+                "Random field has been exhausted! Rethink your threading strategy!"
+            ),
+            SystemTimeError(err) => write!(f, "System time error {err}"),
+        }
+    }
+}
+
+impl From<SystemTimeError> for UUIDv7Error {
+    fn from(error: SystemTimeError) -> Self {
+        Self::SystemTimeError(error)
+    }
+}
+
+impl error::Error for UUIDv7Error {
+    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
+        match self {
+            Self::SystemTimeError(error) => Some(error),
+            _ => None,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -122,8 +208,7 @@ mod test {
 
     #[test]
     fn it_works() {
-        let uuid = crate::v7::generate().unwrap();
-        println!("\n\n\n\nIT_WORKS!!\n{uuid}");
+        let _uuid = crate::v7::generate().unwrap();
     }
 
     #[test]
@@ -145,8 +230,8 @@ mod test {
     fn multiple_ids_same_ms() {
         let ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
 
-        let a = generate_with(ts, rand::rng().random::<u64>());
-        let b = generate_with(ts, rand::rng().random::<u64>());
+        let a = generate_with(ts, rand::rng().random::<u64>()).unwrap();
+        let b = generate_with(ts, rand::rng().random::<u64>()).unwrap();
 
         let a_u128 = crate::uuid_to_u128(&a).unwrap();
         let b_u128 = crate::uuid_to_u128(&b).unwrap();
@@ -175,5 +260,262 @@ mod test {
             expected, random_a,
             "expected = {expected} ; got = {random_a}"
         );
+    }
+
+    //////////
+
+    fn fresh_refs() -> MonotonicRefs {
+        MonotonicRefs {
+            last_timestamp: 0,
+            last_random_a: 0,
+            last_random_b: 0,
+        }
+    }
+
+    fn uuid_to_u128(uuid: &str) -> u128 {
+        u128::from_str_radix(&uuid.replace('-', ""), 16).unwrap()
+    }
+
+    #[test]
+    fn uuid_has_correct_format() {
+        let uuid = generate_with(Duration::from_millis(1_700_000_000_000), 12345).unwrap();
+
+        assert_eq!(uuid.len(), 36);
+        assert_eq!(uuid.chars().filter(|&c| c == '-').count(), 4);
+
+        assert_eq!(&uuid[8..9], "-");
+        assert_eq!(&uuid[13..14], "-");
+        assert_eq!(&uuid[18..19], "-");
+        assert_eq!(&uuid[23..24], "-");
+
+        assert!(uuid.chars().all(|c| c.is_ascii_hexdigit() || c == '-'));
+    }
+
+    #[test]
+    fn uuid_has_correct_version_and_variant() {
+        let uuid = generate_with(Duration::from_millis(1_700_000_000_000), 12345).unwrap();
+
+        // Version 7.
+        assert_eq!(&uuid[14..15], "7");
+
+        // RFC 9562 variant: binary 10xx.
+        assert!(matches!(&uuid[19..20], "8" | "9" | "a" | "b"));
+    }
+
+    #[test]
+    fn timestamp_is_encoded_correctly() {
+        let timestamp = 1_700_000_000_000u128;
+
+        let uuid = generate_with(Duration::from_millis(timestamp as u64), 12345).unwrap();
+
+        let value = uuid_to_u128(&uuid);
+        let decoded_timestamp = (value >> TIMESTAMP_SHIFT) & TIMESTAMP_MASK;
+
+        assert_eq!(decoded_timestamp, timestamp);
+    }
+
+    #[test]
+    fn random_a_uses_submillisecond_precision() {
+        assert_eq!(generate_random_a(Duration::from_nanos(0)), 0);
+        assert_eq!(generate_random_a(Duration::from_nanos(500_000)), 2048);
+        assert_eq!(generate_random_a(Duration::from_nanos(999_999)), 4095);
+    }
+
+    #[test]
+    fn random_a_is_nondecreasing() {
+        let mut previous = 0;
+
+        for nanos in (1_000..1_000_000).step_by(1_000) {
+            let current = generate_random_a(Duration::from_nanos(nanos));
+            assert!(current >= previous);
+            previous = current;
+        }
+    }
+
+    #[test]
+    fn monotonicity_increments_random_b_when_random_a_is_equal() {
+        let mut refs = fresh_refs();
+
+        refs.last_timestamp = 100;
+        refs.last_random_a = 100;
+        refs.last_random_b = 200;
+
+        let mut timestamp = 100;
+        let mut random_a = 100;
+        let mut random_b = 150;
+
+        ensure_monotonic(&mut timestamp, &mut random_a, &mut random_b, &mut refs).unwrap();
+
+        assert_eq!(timestamp, 100);
+        assert_eq!(random_a, 100);
+        assert_eq!(random_b, 201);
+    }
+
+    #[test]
+    fn monotonicity_preserves_higher_random_a() {
+        let mut refs = fresh_refs();
+
+        refs.last_timestamp = 100;
+        refs.last_random_a = 100;
+        refs.last_random_b = 200;
+
+        let mut timestamp = 100;
+        let mut random_a = 101;
+        let mut random_b = 50;
+
+        ensure_monotonic(&mut timestamp, &mut random_a, &mut random_b, &mut refs).unwrap();
+
+        assert_eq!(random_a, 101);
+        assert_eq!(random_b, 50);
+    }
+
+    #[test]
+    fn monotonicity_clamps_lower_random_a() {
+        let mut refs = fresh_refs();
+
+        refs.last_timestamp = 100;
+        refs.last_random_a = 100;
+        refs.last_random_b = 200;
+
+        let mut timestamp = 100;
+        let mut random_a = 50;
+        let mut random_b = 50;
+
+        ensure_monotonic(&mut timestamp, &mut random_a, &mut random_b, &mut refs).unwrap();
+
+        assert_eq!(random_a, 100);
+        assert_eq!(random_b, 201);
+    }
+
+    #[test]
+    fn monotonicity_clamps_backwards_timestamp() {
+        let mut refs = fresh_refs();
+
+        refs.last_timestamp = 100;
+        refs.last_random_a = 100;
+        refs.last_random_b = 200;
+
+        let mut timestamp = 99;
+        let mut random_a = 50;
+        let mut random_b = 50;
+
+        ensure_monotonic(&mut timestamp, &mut random_a, &mut random_b, &mut refs).unwrap();
+
+        assert_eq!(timestamp, 100);
+        assert_eq!(random_a, 100);
+        assert_eq!(random_b, 201);
+    }
+
+    #[test]
+    fn monotonicity_allows_timestamp_to_advance() {
+        let mut refs = fresh_refs();
+
+        refs.last_timestamp = 100;
+        refs.last_random_a = 4095;
+        refs.last_random_b = RANDOM_B_MASK;
+
+        let mut timestamp = 101;
+        let mut random_a = 10;
+        let mut random_b = 20;
+
+        ensure_monotonic(&mut timestamp, &mut random_a, &mut random_b, &mut refs).unwrap();
+
+        assert_eq!(timestamp, 101);
+        assert_eq!(random_a, 10);
+        assert_eq!(random_b, 20);
+    }
+
+    #[test]
+    fn monotonicity_returns_error_when_random_b_is_exhausted() {
+        let mut refs = fresh_refs();
+
+        refs.last_timestamp = 100;
+        refs.last_random_a = 100;
+        refs.last_random_b = RANDOM_B_MASK;
+
+        let mut timestamp = 100;
+        let mut random_a = 100;
+        let mut random_b = RANDOM_B_MASK;
+
+        let result = ensure_monotonic(&mut timestamp, &mut random_a, &mut random_b, &mut refs);
+
+        assert!(matches!(result, Err(UUIDv7Error::RandomFieldExhausted)));
+    }
+
+    #[test]
+    // This launches 8 threads, each generating 10,000 UUIDs simultaneously, then verifies that all 80,000 UUIDs are unique.
+    fn concurrent_generation_produces_unique_uuids() {
+        use std::{
+            collections::HashSet,
+            sync::{Arc, Barrier},
+            thread,
+        };
+
+        const THREADS: usize = 8;
+        const UUIDS_PER_THREAD: usize = 10_000;
+
+        let barrier = Arc::new(Barrier::new(THREADS));
+
+        let handles: Vec<_> = (0..THREADS)
+            .map(|_| {
+                let barrier = Arc::clone(&barrier);
+
+                thread::spawn(move || {
+                    // Synchronize threads so they begin generating together.
+                    barrier.wait();
+                    (0..UUIDS_PER_THREAD)
+                        .map(|_| generate().unwrap())
+                        .collect::<Vec<_>>()
+                })
+            })
+            .collect();
+
+        let uuids: Vec<String> = handles
+            .into_iter()
+            .flat_map(|handle| handle.join().unwrap())
+            .collect();
+
+        assert_eq!(uuids.len(), THREADS * UUIDS_PER_THREAD);
+        let unique_uuids: HashSet<_> = uuids.iter().collect();
+        assert_eq!(unique_uuids.len(), uuids.len());
+    }
+
+    #[test]
+    // This specifically stresses monotonicity logic when multiple threads generate UUIDs using the exact same timestamp.
+    fn concurrent_generation_with_same_timestamp_is_unique() {
+        use std::{
+            collections::HashSet,
+            sync::{Arc, Barrier},
+            thread,
+        };
+
+        const THREADS: usize = 8;
+        const UUIDS_PER_THREAD: usize = 10_000;
+
+        let barrier = Arc::new(Barrier::new(THREADS));
+        let timestamp = Duration::from_millis(1_700_000_000_000);
+
+        let handles: Vec<_> = (0..THREADS)
+            .map(|_| {
+                let barrier = Arc::clone(&barrier);
+
+                thread::spawn(move || {
+                    barrier.wait();
+
+                    (0..UUIDS_PER_THREAD)
+                        .map(|_| generate_with(timestamp, 0).unwrap())
+                        .collect::<Vec<_>>()
+                })
+            })
+            .collect();
+
+        let uuids: Vec<String> = handles
+            .into_iter()
+            .flat_map(|handle| handle.join().unwrap())
+            .collect();
+
+        assert_eq!(uuids.len(), THREADS * UUIDS_PER_THREAD);
+        let unique_uuids: HashSet<_> = uuids.iter().collect();
+        assert_eq!(unique_uuids.len(), uuids.len());
     }
 }
