@@ -47,10 +47,15 @@ const UUID_VARIANT: u128 = 2; // 0b10
 
 pub fn generate() -> Result<String, SystemTimeError> {
     let timestamp_duration = SystemTime::now().duration_since(UNIX_EPOCH)?;
+    let random_b = rand::rng().random::<u64>();
 
+    Ok(generate_with(timestamp_duration, random_b))
+}
+
+fn generate_with(timestamp_duration: Duration, random_b: u64) -> String {
     let unix_ts_ms = timestamp_duration.as_millis() & TIMESTAMP_MASK;
     let random_a = generate_random_a(timestamp_duration) as u128 & RANDOM_A_MASK;
-    let random_b = rand::rng().random::<u64>() as u128 & RANDOM_B_MASK;
+    let random_b = random_b as u128 & RANDOM_B_MASK;
 
     let uuid = (unix_ts_ms << TIMESTAMP_SHIFT)
         | (UUID_VERSION << VERSION_SHIFT)
@@ -58,7 +63,7 @@ pub fn generate() -> Result<String, SystemTimeError> {
         | (UUID_VARIANT << VARIANT_SHIFT)
         | random_b;
 
-    Ok(crate::add_dashes(uuid))
+    crate::add_dashes(uuid)
 }
 
 // https://www.rfc-editor.org/info/rfc9562/#section-6.2
@@ -119,7 +124,7 @@ mod test {
     }
 
     #[test]
-    fn random_a_method_3() {
+    fn example_from_rfc() {
         let expected: u16 = 1870;
 
         // 1 Jan 2023 12:34:56.1234567
