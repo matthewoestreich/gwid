@@ -1,9 +1,40 @@
-use crate::{VARIANT_MASK, VERSION_MASK};
-use rand::RngExt as _;
-use std::time;
+// UUID VERSION 7
+//
+//  0                   1                   2                   3
+//  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+// |                           unix_ts_ms                          |
+// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+// |          unix_ts_ms           |  ver  |       rand_a          |
+// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+// |var|                        rand_b                             |
+// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+// |                            rand_b                             |
+// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//
+// BIT LAYOUT:
+// [000000000000000000000000000000000000000000000000] [0100] [000000000000] [10] [00000000000000000000000000000000000000000000000000000000000000]
+// |<-------------------- unix_ts_ms -------------->| | ver | | random_a | |var| |<------------------------ random_b ------------------------>|
+//
+// unix_ts_ms:
+//     48-bit big-endian unsigned number of the Unix Epoch timestamp in milliseconds as per Section 6.1. Occupies bits 0 through 47 (octets 0-5).
+// ver:
+//     The 4-bit version field as defined by Section 4.2, set to 0b0111 (7). Occupies bits 48 through 51 of octet 6.
+// rand_a:
+//     12 bits of pseudorandom data to provide uniqueness as per Section 6.9 and/or optional constructs to guarantee additional monotonicity as per Section 6.2. Occupies bits 52 through 63 (octets 6-7).
+// var:
+//     The 2-bit variant field as defined by Section 4.1, set to 0b10. Occupies bits 64 and 65 of octet 8.
+// rand_b:
+//     The final 62 bits of pseudorandom data to provide uniqueness as per Section 6.9 and/or an optional counter to guarantee additional monotonicity as per Section 6.2. Occupies bits 66 through 127 (octets 8-15).
+
+use crate::V7_RANDOM_A_MAX;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 pub fn generate() -> String {
-    todo!()
+    let system_time = SystemTime::now();
+    let _random_a = generate_random_a(system_time);
+
+    "".to_string()
 }
 
 // https://www.rfc-editor.org/info/rfc9562/#section-6.2
@@ -46,49 +77,38 @@ pub fn generate() -> String {
 //    in conjunction with one of the other methods, where this additional time precision would
 //    immediately follow the timestamp. Then, if any bits are to be used as a clock sequence, they
 //    would follow next.
-fn generate_random_a() -> u16 {
-    // 1 Jan 2023 12:34:56.1234567
-    let ts_secs = 1_672_576_496;
-    let ts_nanos = 123_456_700;
+fn generate_random_a(system_time: SystemTime) -> u16 {
+    // TODO : maybe fail instead of silently changing `duration`.
+    let duration = system_time
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or(Duration::ZERO);
 
-    let timestamp = time::UNIX_EPOCH + time::Duration::new(ts_secs, ts_nanos);
+    // Scale sub-millisecond precision into the random_a range.
+    let sub_ms_nanos = (duration.subsec_nanos() % 1_000_000) as u64;
+    let extra_precision = V7_RANDOM_A_MAX * sub_ms_nanos;
 
-    let mut last_ms: u128 = 0;
-    let mut already_logged = false;
-
-    for _ in 0..1 {
-        // time::SystemTime::now()
-        let duration = timestamp.duration_since(time::UNIX_EPOCH).unwrap();
-
-        let millis = duration.as_millis();
-
-        if millis == last_ms {
-            if !already_logged {
-                println!("\n ---- SAME MS DETECTED ---- \n");
-                already_logged = true;
-            }
-        } else {
-            already_logged = false;
-        }
-
-        let sub_ms_nanos = duration.subsec_nanos() % 1_000_000;
-        let extra_precision = sub_ms_nanos as f64 / 1_000_000.0;
-        let rand_val = (4096.0 * extra_precision).floor();
-
-        println!("millis          = {millis}");
-        println!("sub_ms_nanos    = {sub_ms_nanos}");
-        println!("extra_precision = {extra_precision}");
-        println!("rand_val        = {rand_val} : {:b}", rand_val as u16);
-        println!();
-
-        last_ms = millis
-    }
-
-    0
+    // random_a
+    (extra_precision / 1_000_000) as u16
 }
 
 #[cfg(test)]
 mod test {
+    use std::time::{Duration, UNIX_EPOCH};
+
     #[test]
-    fn it_works() {}
+    fn it_works() {
+        let _uuid = crate::v7::generate();
+    }
+
+    #[test]
+    fn random_a_method_3() {
+        let expected: u16 = 1870;
+        // 1 Jan 2023 12:34:56.1234567
+        let system_time = UNIX_EPOCH + Duration::new(1_672_576_496, 123_456_700);
+        let random_a = crate::v7::generate_random_a(system_time);
+        assert_eq!(
+            expected, random_a,
+            "expected = {expected} ; got = {random_a}"
+        );
+    }
 }

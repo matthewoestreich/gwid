@@ -1,6 +1,3 @@
-use crate::{VARIANT_MASK, VERSION_MASK};
-use rand::RngExt as _;
-
 // UUID VERSION 4
 //
 //  0                   1                   2                   3
@@ -29,6 +26,9 @@ use rand::RngExt as _;
 //     The 2-bit variant field as defined by Section 4.1, set to 0b10. Occupies bits 64 and 65 of octet 8.
 // random_c:
 //     The final 62 bits of the layout immediately following the var field to be filled with random data as per Section 6.9. Occupies bits 66 through 127 (octets 8-15).
+
+use crate::{VARIANT_MASK, VERSION_MASK};
+use rand::RngExt as _;
 
 pub fn generate() -> String {
     let mut uuid: u128 = rand::rng().random();
