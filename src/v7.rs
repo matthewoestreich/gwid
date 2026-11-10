@@ -45,6 +45,8 @@ const VARIANT_SHIFT: u32 = 62;
 const UUID_VERSION: u128 = 7;
 const UUID_VARIANT: u128 = 2; // 0b10
 
+const RANDOM_A_MAX_VALUE: u64 = 1 << 12;
+
 pub fn generate() -> Result<String, SystemTimeError> {
     let timestamp_duration = SystemTime::now().duration_since(UNIX_EPOCH)?;
     let random_b = rand::rng().random::<u64>();
@@ -108,19 +110,51 @@ fn generate_with(timestamp_duration: Duration, random_b: u64) -> String {
 //    would follow next.
 fn generate_random_a(duration: Duration) -> u16 {
     let sub_ms_nanos = (duration.subsec_nanos() % 1_000_000) as u64;
-    let extra_precision = (RANDOM_A_MASK as u64) * sub_ms_nanos;
+    let extra_precision = RANDOM_A_MAX_VALUE * sub_ms_nanos;
 
     (extra_precision / 1_000_000) as u16
 }
 
 #[cfg(test)]
 mod test {
+    use super::*;
     use std::time::{Duration, UNIX_EPOCH};
 
     #[test]
     fn it_works() {
         let uuid = crate::v7::generate().unwrap();
         println!("\n\n\n\nIT_WORKS!!\n{uuid}");
+    }
+
+    #[test]
+    fn monotonic_generation() {
+        let mut previous: u128 = 0;
+
+        for _ in 0..100_000 {
+            let uuid = generate().unwrap().replace("-", "");
+            let current = u128::from_str_radix(&uuid, 16).unwrap();
+            assert!(
+                current > previous,
+                "expected monotonic generation (current should be > previous) : previous={previous} ; current={current}"
+            );
+            previous = current;
+        }
+    }
+
+    #[test]
+    fn multiple_ids_same_ms() {
+        let ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
+
+        let a = generate_with(ts, rand::rng().random::<u64>());
+        let b = generate_with(ts, rand::rng().random::<u64>());
+
+        let a_u128 = crate::uuid_to_u128(&a).unwrap();
+        let b_u128 = crate::uuid_to_u128(&b).unwrap();
+
+        assert!(
+            a_u128 < b_u128,
+            "expected id generated first to be less than id generated second : first={a_u128} ; second={b_u128}"
+        );
     }
 
     #[test]
