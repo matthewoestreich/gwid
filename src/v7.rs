@@ -157,18 +157,27 @@ fn derive_random_a(from_timestamp: Duration) -> u16 {
     ((RANDOM_A_MAX_VALUE * sub_ms_nanos) / 1_000_000) as u16
 }
 
+/// Ensures the generated UUID is strictly greater than the previously generated UUID.
 fn ensure_monotonicity(
     unix_ts_ms: &mut u128,
     random_a: &mut u128,
     random_b: &mut u128,
     refs: &mut MonotonicRefs,
 ) -> Result<(), UUIDv7Error> {
+    // Enforce nondecreasing time
     *unix_ts_ms = refs.last_timestamp.max(*unix_ts_ms);
 
+    // Only enforce monotonicity on the random fields when the timestamp
+    // has not advanced. A newer timestamp already guarantees a greater UUID.
     if *unix_ts_ms == refs.last_timestamp {
+        // Prevent rand_a from decreasing, preserving the UUID's ordering.
         *random_a = refs.last_random_a.max(*random_a);
 
+        // If rand_a has not advanced, rand_b must increase to ensure the
+        // resulting UUID is strictly greater than the previous one.
         if *random_a == refs.last_random_a && *random_b <= refs.last_random_b {
+            // rand_b cannot advance any further, so monotonicity cannot
+            // be guaranteed within the current timestamp and rand_a.
             if refs.last_random_b == RANDOM_B_MASK {
                 return Err(UUIDv7Error::RandomFieldExhausted);
             }
