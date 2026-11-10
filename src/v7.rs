@@ -31,8 +31,12 @@ use crate::V7_RANDOM_A_MAX;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 pub fn generate() -> String {
-    let system_time = SystemTime::now();
-    let _random_a = generate_random_a(system_time);
+    let timestamp_duration = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("v7::generate");
+
+    let _timestamp = timestamp_duration.as_millis();
+    let _random_a = generate_random_a(timestamp_duration);
 
     "".to_string()
 }
@@ -77,12 +81,7 @@ pub fn generate() -> String {
 //    in conjunction with one of the other methods, where this additional time precision would
 //    immediately follow the timestamp. Then, if any bits are to be used as a clock sequence, they
 //    would follow next.
-fn generate_random_a(system_time: SystemTime) -> u16 {
-    // TODO : maybe fail instead of silently changing `duration`.
-    let duration = system_time
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or(Duration::ZERO);
-
+fn generate_random_a(duration: Duration) -> u16 {
     // Scale sub-millisecond precision into the random_a range.
     let sub_ms_nanos = (duration.subsec_nanos() % 1_000_000) as u64;
     let extra_precision = V7_RANDOM_A_MAX * sub_ms_nanos;
@@ -103,9 +102,19 @@ mod test {
     #[test]
     fn random_a_method_3() {
         let expected: u16 = 1870;
+
         // 1 Jan 2023 12:34:56.1234567
-        let system_time = UNIX_EPOCH + Duration::new(1_672_576_496, 123_456_700);
-        let random_a = crate::v7::generate_random_a(system_time);
+        let jan_1_2023_12_34_56_1234567 = UNIX_EPOCH + Duration::new(1_672_576_496, 123_456_700);
+
+        let duration = jan_1_2023_12_34_56_1234567
+            .duration_since(UNIX_EPOCH)
+            .unwrap();
+
+        let timestamp = duration.as_millis();
+        let random_a = crate::v7::generate_random_a(duration);
+
+        println!("\ntimestamp = {timestamp}\nrandom_a = {random_a}\n");
+
         assert_eq!(
             expected, random_a,
             "expected = {expected} ; got = {random_a}"
