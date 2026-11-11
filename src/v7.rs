@@ -176,13 +176,28 @@ fn ensure_monotonicity(
         // If rand_a has not advanced, rand_b must increase to ensure the
         // resulting UUID is strictly greater than the previous one.
         if *random_a == refs.last_random_a && *random_b <= refs.last_random_b {
-            // rand_b cannot advance any further, so monotonicity cannot
-            // be guaranteed within the current timestamp and rand_a.
             if refs.last_random_b == RANDOM_B_MASK {
-                return Err(UUIDv7Error::RandomFieldExhausted);
-            }
+                if refs.last_random_a == RANDOM_A_MASK {
+                    if *unix_ts_ms == TIMESTAMP_MASK {
+                        // All fields + timestamp have been exhausted, we have no
+                        // choice but to error here (without getting too cute).
+                        return Err(UUIDv7Error::TimestampExhausted);
+                    }
 
-            *random_b = refs.last_random_b + 1;
+                    // Both random fields are exhausted. Advance the timestamp
+                    // to preserve monotonicity, then reset both random fields.
+                    *unix_ts_ms += 1;
+                    *random_a = 0;
+                    *random_b = 0;
+                } else {
+                    // rand_b is exhausted. Increment rand_a (the next
+                    // more significant field) and reset rand_b.
+                    *random_a += 1;
+                    *random_b = 0;
+                }
+            } else {
+                *random_b = refs.last_random_b + 1;
+            }
         }
     }
 
@@ -196,6 +211,7 @@ fn ensure_monotonicity(
 #[derive(Debug)]
 pub enum UUIDv7Error {
     RandomFieldExhausted,
+    TimestampExhausted,
     SystemTimeError(SystemTimeError),
 }
 
@@ -206,6 +222,10 @@ impl Display for UUIDv7Error {
             RandomFieldExhausted => write!(
                 f,
                 "Random field has been exhausted! Rethink your threading strategy!"
+            ),
+            TimestampExhausted => write!(
+                f,
+                "Timestamp has been exhausted! Rethink your threading strategy!"
             ),
             SystemTimeError(err) => write!(f, "System time error {err}"),
         }
@@ -235,6 +255,42 @@ mod test {
     #[test]
     fn it_works() {
         let _uuid = crate::v7::generate().unwrap();
+    }
+
+    #[test]
+    #[ignore]
+    // This test is just for me to watch creation.
+    // `cargo nextest run generate_until_duplicate_or_manually_stopped --run-ignored only --no-capture`
+    fn generate_until_duplicate_or_manually_stopped() {
+        use std::collections::HashSet;
+        let mut uuids = HashSet::new();
+        let mut prev: u128 = 0;
+
+        loop {
+            // so we dont run out of RAM ...
+            if uuids.len() > 100_000_000 {
+                uuids.clear();
+                println!("RESET UUID SET");
+                std::thread::sleep(Duration::from_secs(3));
+            }
+
+            let current_id = generate().unwrap();
+            let current_id_u128 = uuid_to_u128(&current_id);
+
+            assert!(
+                uuids.insert(current_id_u128),
+                "duplicate ID encountered! {current_id}"
+            );
+
+            assert!(
+                current_id_u128 > prev,
+                "ids should be stricty increasing! current={current_id_u128} is less than previous={prev}"
+            );
+
+            prev = current_id_u128;
+
+            println!("{current_id}");
+        }
     }
 
     #[test]
