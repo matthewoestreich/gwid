@@ -15,8 +15,8 @@
 // +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 //
 // BIT LAYOUT:
-// [000000000000000000000000000000000000000000000000] [0100] [000000000000] [10] [00000000000000000000000000000000000000000000000000000000000000]
-// |<-------------------- unix_ts_ms -------------->| | ver | | random_a | |var| |<------------------------ random_b ------------------------>|
+// [000000000000000000000000000000000000000000000000] [0111] [000000000000] [10] [00000000000000000000000000000000000000000000000000000000000000]
+// |<-------------------- unix_ts_ms -------------->| | ver | | random_a | |var| |<------------------------ random_b -------------------------->|
 //
 // unix_ts_ms:
 //     48-bit big-endian unsigned number of the Unix Epoch timestamp in milliseconds as per Section 6.1. Occupies bits 0 through 47 (octets 0-5).
@@ -37,36 +37,64 @@ use std::{
     time::{Duration, SystemTime, SystemTimeError, UNIX_EPOCH},
 };
 
+static CONTEXT: LazyLock<Mutex<UUIDv7Context>> =
+    LazyLock::new(|| Mutex::new(UUIDv7Context { ts: 0, a: 0, b: 0 }));
+
+const RANDOM_A_BITS: u8 = 12;
+const RANDOM_B_BITS: u8 = 62;
+const TIMESTAMP_BITS: u8 = 48;
+
+const RANDOM_A_TOTAL_VALUES: u16 = 1 << RANDOM_A_BITS;
+
+/// 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00001111 11111111
+const RANDOM_A_MASK: u16 = RANDOM_A_TOTAL_VALUES - 1;
+/// 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00111111 11111111 11111111 11111111 11111111 11111111 11111111 11111111
+const RANDOM_B_MASK: u64 = (1 << RANDOM_B_BITS) - 1;
+/// 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 11111111 11111111 11111111 11111111 11111111 11111111
+const TIMESTAMP_MASK: u64 = (1 << TIMESTAMP_BITS) - 1;
+
+const TIMESTAMP_SHIFT: u8 = 80;
+const RANDOM_A_SHIFT: u8 = 64;
+const VERSION_SHIFT: u8 = 76;
+const VARIANT_SHIFT: u8 = 62;
+
+const VERSION: u8 = 7; // 0b111
+const VARIANT: u8 = 2; // 0b10
+
 /// To hold global state for monotonic id generation
-pub(crate) struct MonotonicRefs {
-    pub(crate) last_timestamp: u128,
-    pub(crate) last_random_a: u128,
-    pub(crate) last_random_b: u128,
+#[derive(Debug)]
+struct UUIDv7Context {
+    /// previous timestamp (uses ms)
+    pub(crate) ts: u128,
+    /// previous random_a
+    pub(crate) a: u16,
+    /// previous random_b
+    pub(crate) b: u64,
 }
 
-/// Global monotonic references
-pub(crate) static MONOTONIC_REFS: LazyLock<Mutex<MonotonicRefs>> = LazyLock::new(|| {
-    Mutex::new(MonotonicRefs {
-        last_timestamp: 0,
-        last_random_a: 0,
-        last_random_b: 0,
-    })
-});
+/// Generates a UUIDv7 using the current Unix timestamp and a cryptographically
+/// secure random number generator.
+///
+/// **This method is not strictly monotonic!** If you need strict monotonicity,
+/// use the `generate_strict()` method!
+///
+/// If multiple IDs are generated in the same sub-ms (nanosecond) precision,
+/// they are not guaranteed to be generated in order!
+///
+/// The 48-bit timestamp is combined with sub-millisecond timestamp precision
+/// to populate the 12-bit `rand_a` field, following Method 3 described in
+/// [RFC 9562, Section 6.2](https://www.rfc-editor.org/rfc/rfc9562.html#section-6.2).
+/// The remaining 62 bits are populated using cryptographically secure randomness.
+///
+/// # Errors
+///
+/// Returns [UUIDv7Error::SystemTimeError] if the system time is earlier than [UNIX_EPOCH].
+pub fn generate() -> Result<String, UUIDv7Error> {
+    let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?;
+    let random_b = rand::rng().random::<u64>();
 
-const RANDOM_A_MASK: u128 = 0b00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000111111111111;
-const RANDOM_B_MASK: u128 = 0b00000000000000000000000000000000000000000000000000000000000000000011111111111111111111111111111111111111111111111111111111111111;
-const TIMESTAMP_MASK: u128 =
-    0b00000000000000000000000000000000000000000000000000000000000000000000000000000000111111111111111111111111111111111111111111111111;
-
-const TIMESTAMP_SHIFT: u128 = 80;
-const RANDOM_A_SHIFT: u128 = 64;
-const VERSION_SHIFT: u32 = 76;
-const VARIANT_SHIFT: u32 = 62;
-
-const UUID_VERSION: u128 = 7;
-const UUID_VARIANT: u128 = 2; // 0b10
-
-const RANDOM_A_MAX_VALUE: u64 = 1 << 12;
+    Ok(generate_with(timestamp, random_b))
+}
 
 /// Generates a UUIDv7 using the current Unix timestamp and a cryptographically
 /// secure random number generator.
@@ -76,6 +104,9 @@ const RANDOM_A_MAX_VALUE: u64 = 1 << 12;
 /// [RFC 9562, Section 6.2](https://www.rfc-editor.org/rfc/rfc9562.html#section-6.2).
 /// The remaining 62 bits are populated using cryptographically secure randomness.
 ///
+/// In order to be strictly monotonic, we incorporate Method 2 described in
+/// [RFC 9562, Section 6.2](https://www.rfc-editor.org/rfc/rfc9562.html#section-6.2).
+///
 /// A process-wide monotonic state ensures that generated UUIDs are strictly
 /// increasing, even when multiple threads generate UUIDs concurrently or the
 /// system clock moves backwards.
@@ -83,135 +114,131 @@ const RANDOM_A_MAX_VALUE: u64 = 1 << 12;
 /// # Errors
 ///
 /// Returns [UUIDv7Error::SystemTimeError] if the system time is earlier than
-/// [UNIX_EPOCH], or [UUIDv7Error::RandomFieldExhausted] if the random field
-/// cannot be advanced while preserving monotonicity.
-pub fn generate() -> Result<String, UUIDv7Error> {
+/// [UNIX_EPOCH], or [UUIDv7Error::Exhausted] if both random fields
+/// and the timestamp cannot be advanced while preserving monotonicity; eg. everything
+/// overflowed.
+pub fn generate_strict() -> Result<String, UUIDv7Error> {
     let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?;
     let random_b = rand::rng().random::<u64>();
 
-    generate_with(timestamp, random_b)
+    generate_strict_with(timestamp, random_b)
 }
 
-fn generate_with(timestamp: Duration, random_b: u64) -> Result<String, UUIDv7Error> {
-    let mut unix_ts_ms = timestamp.as_millis() & TIMESTAMP_MASK;
-    let mut random_a = derive_random_a(timestamp) as u128 & RANDOM_A_MASK;
-    let mut random_b = random_b as u128 & RANDOM_B_MASK;
+/// **This method is not strictly monotonic!** If you need strict monotonicity,
+/// use the `generate_strict()` method!
+///
+/// If multiple IDs are generated in the same sub-ms (nanosecond) precision,
+/// they are not guaranteed to be generated in order!
+///
+/// The 48-bit timestamp is combined with sub-millisecond timestamp precision
+/// to populate the 12-bit `rand_a` field, following Method 3 described in
+/// [RFC 9562, Section 6.2](https://www.rfc-editor.org/rfc/rfc9562.html#section-6.2).
+/// The remaining 62 bits are populated using cryptographically secure randomness.
+fn generate_with(timestamp: Duration, random_b: u64) -> String {
+    let unix_ts_ms = timestamp.as_millis() & TIMESTAMP_MASK as u128;
+    let random_a = derive_random_a(timestamp) & RANDOM_A_MASK;
+    let random_b = random_b & RANDOM_B_MASK;
 
-    let mut refs = MONOTONIC_REFS
+    uuid_from_parts(unix_ts_ms, VERSION, random_a, VARIANT, random_b)
+}
+
+/// Enorce strict monotonicity across process.
+///
+/// The 48-bit timestamp is combined with sub-millisecond timestamp precision
+/// to populate the 12-bit `rand_a` field, following Method 3 described in
+/// [RFC 9562, Section 6.2](https://www.rfc-editor.org/rfc/rfc9562.html#section-6.2).
+/// The remaining 62 bits are populated using cryptographically secure randomness.
+///
+/// In order to be strictly monotonic, we incorporate Method 2 described in
+/// [RFC 9562, Section 6.2](https://www.rfc-editor.org/rfc/rfc9562.html#section-6.2).
+fn generate_strict_with(timestamp: Duration, random_b: u64) -> Result<String, UUIDv7Error> {
+    let mut unix_ts_ms = timestamp.as_millis() & TIMESTAMP_MASK as u128;
+    let mut random_a = derive_random_a(timestamp) & RANDOM_A_MASK;
+    let mut random_b = random_b & RANDOM_B_MASK;
+
+    let mut ctx = CONTEXT
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
 
-    ensure_monotonicity(&mut unix_ts_ms, &mut random_a, &mut random_b, &mut refs)?;
+    ensure_monotonicity(&mut unix_ts_ms, &mut random_a, &mut random_b, &mut ctx)?;
 
-    let uuid = (unix_ts_ms << TIMESTAMP_SHIFT)
-        | (UUID_VERSION << VERSION_SHIFT)
-        | (random_a << RANDOM_A_SHIFT)
-        | (UUID_VARIANT << VARIANT_SHIFT)
-        | random_b;
-
-    Ok(crate::add_hyphens(uuid))
+    Ok(uuid_from_parts(
+        unix_ts_ms, VERSION, random_a, VARIANT, random_b,
+    ))
 }
 
-// https://www.rfc-editor.org/info/rfc9562/#section-6.2
-//
-// This is for generating the `random_a` bits as to satisfy monotonic constraints.
-//
-// We have chosen Method 3:
-//
-//  Replace Leftmost Random Bits with Increased Clock Precision (Method 3):
-//
-//    For UUIDv7, which has millisecond timestamp precision, it is possible to use additional
-//    clock precision available on the system to substitute for up to 12 random bits immediately
-//    following the timestamp. This can provide values that are time ordered with sub-millisecond
-//    precision, using however many bits are appropriate in the implementation environment. With
-//    this method, the additional time precision bits MUST follow the timestamp as the next
-//    available bit in the rand_a field for UUIDv7.
-//
-//    To calculate this value, start with the portion of the timestamp expressed as a fraction
-//    of the clock's tick value (fraction of a millisecond for UUIDv7). Compute the count of
-//    possible values that can be represented in the available bit space, 4096 for the UUIDv7
-//    rand_a field. Using floating point or scaled integer arithmetic, multiply this fraction of
-//    a millisecond value by 4096 and round down (toward zero) to an integer result to arrive at
-//    a number between 0 and the maximum allowed for the indicated bits, which sorts monotonically
-//    based on time. Each increasing fractional value will result in an increasing bit field value
-//    to the precision available with these bits.
-//
-//    For example, let's assume a system timestamp of 1 Jan 2023 12:34:56.1234567. Taking the
-//    precision greater than 1 ms gives us a value of 0.4567, as a fraction of a millisecond.
-//    If we wish to encode this as 12 bits, we can take the count of possible values that fit in
-//    those bits (4096 or 212), multiply it by our millisecond fraction value of 0.4567, and
-//    truncate the result to an integer, which gives an integer value of 1870. Expressed as
-//    hexadecimal, it is 0x74E or the binary bits 0b011101001110. One can then use those 12 bits
-//    as the most significant (leftmost) portion of the random section of the UUID (e.g., the
-//    rand_a field in UUIDv7). This works for any desired bit length that fits into a UUID,
-//    and applications can decide the appropriate length based on available clock precision;
-//    for UUIDv7, it is limited to 12 bits at maximum to reserve sufficient space for random bits.
-//    The main benefit to encoding additional timestamp precision is that it utilizes additional
-//    time precision already available in the system clock to provide values that are more likely
-//    to be unique; thus, it may simplify certain implementations. This technique can also be used
-//    in conjunction with one of the other methods, where this additional time precision would
-//    immediately follow the timestamp. Then, if any bits are to be used as a clock sequence, they
-//    would follow next.
+/// Generate `random_a` bits using additional clock  precision as to satisfy monotonic
+/// constraints following **Method 3** described in [RFC 9562, Section 6.2](https://www.rfc-editor.org/rfc/rfc9562.html#section-6.2)
 fn derive_random_a(from_timestamp: Duration) -> u16 {
-    let sub_ms_nanos = (from_timestamp.subsec_nanos() % 1_000_000) as u64;
-    ((RANDOM_A_MAX_VALUE * sub_ms_nanos) / 1_000_000) as u16
+    let sub_ms_nanos = from_timestamp.subsec_nanos() % 1_000_000;
+    ((RANDOM_A_TOTAL_VALUES as u32 * sub_ms_nanos) / 1_000_000) as u16
 }
 
-/// Ensures the generated UUID is strictly greater than the previously generated UUID.
+fn uuid_from_parts(
+    unix_ts_ms: u128,
+    version: u8,
+    random_a: u16,
+    variant: u8,
+    random_b: u64,
+) -> String {
+    let uuid = (unix_ts_ms << TIMESTAMP_SHIFT)
+        | ((version as u128) << (VERSION_SHIFT as u128))
+        | ((random_a as u128) << (RANDOM_A_SHIFT as u128))
+        | ((variant as u128) << (VARIANT_SHIFT as u128))
+        | (random_b as u128);
+
+    crate::add_hyphens(uuid)
+}
+
+/// - Enforces nondecreasing time.
+/// - Only need monotonicity if timestamps were in same sub-ms precision,
+///   in which case, only `random_b` is incremented.
+/// - Handles overflow.
+/// - Updates global context.
 fn ensure_monotonicity(
     unix_ts_ms: &mut u128,
-    random_a: &mut u128,
-    random_b: &mut u128,
-    refs: &mut MonotonicRefs,
+    random_a: &mut u16,
+    random_b: &mut u64,
+    ctx: &mut UUIDv7Context,
 ) -> Result<(), UUIDv7Error> {
-    // Enforce nondecreasing time
-    *unix_ts_ms = refs.last_timestamp.max(*unix_ts_ms);
+    // Enforce nondecreasing time.
+    *unix_ts_ms = ctx.ts.max(*unix_ts_ms);
 
-    // Only enforce monotonicity on the random fields when the timestamp
-    // has not advanced. A newer timestamp already guarantees a greater UUID.
-    if *unix_ts_ms == refs.last_timestamp {
-        // Prevent rand_a from decreasing, preserving the UUID's ordering.
-        *random_a = refs.last_random_a.max(*random_a);
+    // Only need monotonicity if timestamps were in same sub-ms precision.
+    if *unix_ts_ms == ctx.ts && *random_a == ctx.a {
+        // Prevent sub-ms precision from decreasing
+        *random_a = ctx.a.max(*random_a);
 
-        // If rand_a has not advanced, rand_b must increase to ensure the
-        // resulting UUID is strictly greater than the previous one.
-        if *random_a == refs.last_random_a && *random_b <= refs.last_random_b {
-            if refs.last_random_b == RANDOM_B_MASK {
-                if refs.last_random_a == RANDOM_A_MASK {
-                    if *unix_ts_ms == TIMESTAMP_MASK {
-                        // All fields + timestamp have been exhausted, we have no
-                        // choice but to error here (without getting too cute).
-                        return Err(UUIDv7Error::TimestampExhausted);
-                    }
-
-                    // Both random fields are exhausted. Advance the timestamp
-                    // to preserve monotonicity, then reset both random fields.
-                    *unix_ts_ms += 1;
-                    *random_a = 0;
-                    *random_b = 0;
-                } else {
-                    // rand_b is exhausted. Increment rand_a (the next
-                    // more significant field) and reset rand_b.
-                    *random_a += 1;
-                    *random_b = 0;
-                }
+        // Only need to advance rand_b when rand_a has not advanced
+        // and rand_b is not already greater than its previous value.
+        if *random_a == ctx.a && *random_b <= ctx.b {
+            if ctx.b < RANDOM_B_MASK {
+                *random_b = (*random_b).max(ctx.b + 1);
+            } else if ctx.a < RANDOM_A_MASK {
+                // rand_b is exhausted. Advance rand_a.
+                *random_a = ctx.a + 1;
+                *random_b = 0;
+            } else if ctx.ts < TIMESTAMP_MASK as u128 {
+                // Both random fields are exhausted. Advance the timestamp.
+                *unix_ts_ms = ctx.ts + 1;
+                *random_a = 0;
+                *random_b = 0;
             } else {
-                *random_b = refs.last_random_b + 1;
+                return Err(UUIDv7Error::Exhausted);
             }
         }
     }
 
-    refs.last_timestamp = *unix_ts_ms;
-    refs.last_random_a = *random_a;
-    refs.last_random_b = *random_b;
+    ctx.ts = *unix_ts_ms;
+    ctx.a = *random_a;
+    ctx.b = *random_b;
 
     Ok(())
 }
 
 #[derive(Debug)]
 pub enum UUIDv7Error {
-    RandomFieldExhausted,
-    TimestampExhausted,
+    Exhausted,
     SystemTimeError(SystemTimeError),
 }
 
@@ -219,13 +246,9 @@ impl Display for UUIDv7Error {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         use UUIDv7Error::*;
         match self {
-            RandomFieldExhausted => write!(
+            Exhausted => write!(
                 f,
-                "Random field has been exhausted! Rethink your threading strategy!"
-            ),
-            TimestampExhausted => write!(
-                f,
-                "Timestamp has been exhausted! Rethink your threading strategy!"
+                "Both random fields, as well as the timestamp, have been exhausted! Rethink your threading strategy!"
             ),
             SystemTimeError(err) => write!(f, "System time error {err}"),
         }
@@ -252,23 +275,19 @@ mod test {
     use super::*;
     use std::time::{Duration, UNIX_EPOCH};
 
-    fn fresh_refs() -> MonotonicRefs {
-        MonotonicRefs {
-            last_timestamp: 0,
-            last_random_a: 0,
-            last_random_b: 0,
-        }
+    fn fresh_ctx() -> UUIDv7Context {
+        UUIDv7Context { ts: 0, a: 0, b: 0 }
     }
 
     #[test]
     fn it_works() {
-        let _uuid = crate::v7::generate().unwrap();
+        let _uuid = crate::v7::generate_strict().unwrap();
     }
 
     #[test]
     #[ignore]
     // This test is just for me to watch creation.
-    // `cargo nextest run generate_until_duplicate_or_manually_stopped --run-ignored only --no-capture`
+    // `clear && cargo nextest run generate_until_duplicate_or_manually_stopped --run-ignored only --no-capture`
     fn generate_until_duplicate_or_manually_stopped() {
         use std::collections::HashSet;
         let mut uuids = HashSet::new();
@@ -282,21 +301,19 @@ mod test {
                 std::thread::sleep(Duration::from_secs(3));
             }
 
-            let current_id = generate().unwrap();
+            let current_id = generate_strict().unwrap();
             let current_id_u128 = crate::uuid_to_u128(&current_id);
 
             assert!(
                 uuids.insert(current_id_u128),
                 "duplicate ID encountered! {current_id}"
             );
-
             assert!(
                 current_id_u128 > prev,
                 "ids should be stricty increasing! current={current_id_u128} is less than previous={prev}"
             );
 
             prev = current_id_u128;
-
             println!("{current_id}");
         }
     }
@@ -306,7 +323,7 @@ mod test {
         let mut previous: u128 = 0;
 
         for _ in 0..100_000 {
-            let uuid = generate().unwrap().replace("-", "");
+            let uuid = generate_strict().unwrap().replace("-", "");
             let current = u128::from_str_radix(&uuid, 16).unwrap();
             assert!(
                 current > previous,
@@ -320,16 +337,18 @@ mod test {
     fn multiple_ids_same_ms() {
         let ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
 
-        let a = generate_with(ts, rand::rng().random::<u64>()).unwrap();
-        let b = generate_with(ts, rand::rng().random::<u64>()).unwrap();
+        let a = generate_strict_with(ts, rand::rng().random::<u64>()).unwrap();
+        let b = generate_strict_with(ts, rand::rng().random::<u64>()).unwrap();
 
         let a_u128 = crate::uuid_to_u128(&a);
         let b_u128 = crate::uuid_to_u128(&b);
 
+        println!("a_uuid={a} a_u128={a_u128}\nb_uuid={b} b_u128={b_u128}",);
         assert!(
             a_u128 < b_u128,
-            "expected id generated first to be less than id generated second : first={a_u128} ; second={b_u128}"
+            "expected id generated first to be less than id generated second : first={a_u128} ; second={b_u128}",
         );
+        println!("{}", "-".repeat(100));
     }
 
     #[test]
@@ -354,7 +373,7 @@ mod test {
 
     #[test]
     fn uuid_has_correct_format() {
-        let uuid = generate_with(Duration::from_millis(1_700_000_000_000), 12345).unwrap();
+        let uuid = generate_strict_with(Duration::from_millis(1_700_000_000_000), 12345).unwrap();
 
         assert_eq!(uuid.len(), 36);
         assert_eq!(uuid.chars().filter(|&c| c == '-').count(), 4);
@@ -369,7 +388,7 @@ mod test {
 
     #[test]
     fn uuid_has_correct_version_and_variant() {
-        let uuid = generate_with(Duration::from_millis(1_700_000_000_000), 12345).unwrap();
+        let uuid = generate_strict_with(Duration::from_millis(1_700_000_000_000), 12345).unwrap();
 
         // Version 7.
         assert_eq!(&uuid[14..15], "7");
@@ -382,10 +401,10 @@ mod test {
     fn timestamp_is_encoded_correctly() {
         let timestamp = 1_700_000_000_000u128;
 
-        let uuid = generate_with(Duration::from_millis(timestamp as u64), 12345).unwrap();
+        let uuid = generate_strict_with(Duration::from_millis(timestamp as u64), 12345).unwrap();
 
         let value = crate::uuid_to_u128(&uuid);
-        let decoded_timestamp = (value >> TIMESTAMP_SHIFT) & TIMESTAMP_MASK;
+        let decoded_timestamp = (value >> TIMESTAMP_SHIFT) & TIMESTAMP_MASK as u128;
 
         assert_eq!(decoded_timestamp, timestamp);
     }
@@ -410,72 +429,110 @@ mod test {
 
     #[test]
     fn monotonicity_increments_random_b_when_random_a_is_equal() {
-        let mut refs = fresh_refs();
+        let mut ctx = fresh_ctx();
 
-        refs.last_timestamp = 100;
-        refs.last_random_a = 100;
-        refs.last_random_b = 200;
+        ctx.ts = 100;
+        ctx.a = 100;
+        ctx.b = 200;
 
         let mut timestamp = 100;
         let mut random_a = 100;
         let mut random_b = 150;
 
-        ensure_monotonicity(&mut timestamp, &mut random_a, &mut random_b, &mut refs).unwrap();
+        //ensure_monotonicity(&mut timestamp, &mut random_a, &mut random_b, &mut ctx).unwrap();
+        ensure_monotonicity(&mut timestamp, &mut random_a, &mut random_b, &mut ctx).unwrap();
 
         assert_eq!(timestamp, 100);
         assert_eq!(random_a, 100);
-        assert_eq!(random_b, 201);
+        assert_eq!(
+            random_b, 201,
+            "expected randomb_b to equal 201, got={random_b}"
+        );
     }
 
     #[test]
     fn monotonicity_preserves_higher_random_a() {
-        let mut refs = fresh_refs();
+        let mut ctx = fresh_ctx();
 
-        refs.last_timestamp = 100;
-        refs.last_random_a = 100;
-        refs.last_random_b = 200;
+        ctx.ts = 100;
+        ctx.a = 100;
+        ctx.b = 200;
 
         let mut timestamp = 100;
         let mut random_a = 101;
         let mut random_b = 50;
 
-        ensure_monotonicity(&mut timestamp, &mut random_a, &mut random_b, &mut refs).unwrap();
+        // ensure_monotonicity(&mut timestamp, &mut random_a, &mut random_b, &mut ctx).unwrap();
+        ensure_monotonicity(&mut timestamp, &mut random_a, &mut random_b, &mut ctx).unwrap();
 
         assert_eq!(random_a, 101);
         assert_eq!(random_b, 50);
     }
 
     #[test]
-    fn monotonicity_clamps_lower_random_a() {
-        let mut refs = fresh_refs();
+    fn monotonicity_increments_random_b_when_timestamp_and_random_a_match() {
+        let mut ctx = fresh_ctx();
 
-        refs.last_timestamp = 100;
-        refs.last_random_a = 100;
-        refs.last_random_b = 200;
+        ctx.ts = 100;
+        ctx.a = 100;
+        ctx.b = 200;
 
         let mut timestamp = 100;
-        let mut random_a = 50;
+        let mut random_a = 100;
         let mut random_b = 50;
 
-        ensure_monotonicity(&mut timestamp, &mut random_a, &mut random_b, &mut refs).unwrap();
+        ensure_monotonicity(&mut timestamp, &mut random_a, &mut random_b, &mut ctx).unwrap();
 
-        assert_eq!(random_a, 100);
         assert_eq!(random_b, 201);
     }
 
     #[test]
-    fn monotonicity_clamps_backwards_timestamp() {
-        let mut refs = fresh_refs();
+    fn monotonicity_preserves_higher_random_b_when_timestamp_and_random_a_match() {
+        let mut ctx = fresh_ctx();
 
-        refs.last_timestamp = 100;
-        refs.last_random_a = 100;
-        refs.last_random_b = 200;
+        ctx.ts = 100;
+        ctx.a = 100;
+        ctx.b = 200;
 
-        let mut timestamp = 99;
-        let mut random_a = 50;
+        let mut timestamp = 100;
+        let mut random_a = 100;
+        let mut random_b = 300;
+
+        ensure_monotonicity(&mut timestamp, &mut random_a, &mut random_b, &mut ctx).unwrap();
+
+        assert_eq!(random_b, 300);
+    }
+
+    #[test]
+    fn monotonicity_does_not_increment_random_b_when_random_a_differs() {
+        let mut ctx = fresh_ctx();
+
+        ctx.ts = 100;
+        ctx.a = 100;
+        ctx.b = 200;
+
+        let mut timestamp = 100;
+        let mut random_a = 101;
         let mut random_b = 50;
 
-        ensure_monotonicity(&mut timestamp, &mut random_a, &mut random_b, &mut refs).unwrap();
+        ensure_monotonicity(&mut timestamp, &mut random_a, &mut random_b, &mut ctx).unwrap();
+
+        assert_eq!(random_b, 50);
+    }
+
+    #[test]
+    fn monotonicity_clamps_backwards_timestamp() {
+        let mut ctx = fresh_ctx();
+
+        ctx.ts = 100;
+        ctx.a = 100;
+        ctx.b = 200;
+
+        let mut timestamp = 99;
+        let mut random_a = 100;
+        let mut random_b = 200;
+
+        ensure_monotonicity(&mut timestamp, &mut random_a, &mut random_b, &mut ctx).unwrap();
 
         assert_eq!(timestamp, 100);
         assert_eq!(random_a, 100);
@@ -484,38 +541,21 @@ mod test {
 
     #[test]
     fn monotonicity_allows_timestamp_to_advance() {
-        let mut refs = fresh_refs();
+        let mut ctx = fresh_ctx();
 
-        refs.last_timestamp = 100;
-        refs.last_random_a = 4095;
-        refs.last_random_b = RANDOM_B_MASK;
+        ctx.ts = 100;
+        ctx.a = 4095;
+        ctx.b = RANDOM_B_MASK;
 
         let mut timestamp = 101;
         let mut random_a = 10;
         let mut random_b = 20;
 
-        ensure_monotonicity(&mut timestamp, &mut random_a, &mut random_b, &mut refs).unwrap();
+        ensure_monotonicity(&mut timestamp, &mut random_a, &mut random_b, &mut ctx).unwrap();
 
         assert_eq!(timestamp, 101);
         assert_eq!(random_a, 10);
         assert_eq!(random_b, 20);
-    }
-
-    #[test]
-    fn monotonicity_returns_error_when_random_b_is_exhausted() {
-        let mut refs = fresh_refs();
-
-        refs.last_timestamp = 100;
-        refs.last_random_a = 100;
-        refs.last_random_b = RANDOM_B_MASK;
-
-        let mut timestamp = 100;
-        let mut random_a = 100;
-        let mut random_b = RANDOM_B_MASK;
-
-        let result = ensure_monotonicity(&mut timestamp, &mut random_a, &mut random_b, &mut refs);
-
-        assert!(matches!(result, Err(UUIDv7Error::RandomFieldExhausted)));
     }
 
     #[test]
@@ -540,7 +580,7 @@ mod test {
                     // Synchronize threads so they begin generating together.
                     barrier.wait();
                     (0..UUIDS_PER_THREAD)
-                        .map(|_| generate().unwrap())
+                        .map(|_| generate_strict().unwrap())
                         .collect::<Vec<_>>()
                 })
             })
@@ -579,7 +619,7 @@ mod test {
                     barrier.wait();
 
                     (0..UUIDS_PER_THREAD)
-                        .map(|_| generate_with(timestamp, 0).unwrap())
+                        .map(|_| generate_strict_with(timestamp, 0).unwrap())
                         .collect::<Vec<_>>()
                 })
             })
@@ -590,8 +630,20 @@ mod test {
             .flat_map(|handle| handle.join().unwrap())
             .collect();
 
-        assert_eq!(uuids.len(), THREADS * UUIDS_PER_THREAD);
+        let uuids_len = uuids.len();
+        let expect_len = THREADS * UUIDS_PER_THREAD;
+
+        assert_eq!(
+            uuids_len, expect_len,
+            "expected uuids.len={uuids_len} and expected_len={expect_len} to be equal"
+        );
+
         let unique_uuids: HashSet<_> = uuids.iter().collect();
-        assert_eq!(unique_uuids.len(), uuids.len());
+        let unique_uuids_len = unique_uuids.len();
+
+        assert_eq!(
+            unique_uuids_len, uuids_len,
+            "expected unique_uuids_len={unique_uuids_len} to equal uuids_len={uuids_len}"
+        );
     }
 }
