@@ -38,7 +38,8 @@ pub(crate) fn print_bits<T: Binary>(value: T) {
     println!();
 }
 
+/// Unchecked method! Panics if something goes wrong.
 #[allow(dead_code)]
-pub(crate) fn uuid_to_u128(uuid: &str) -> Result<u128, std::num::ParseIntError> {
-    u128::from_str_radix(&uuid.replace("-", ""), 16)
+pub(crate) fn uuid_to_u128(uuid: &str) -> u128 {
+    u128::from_str_radix(&uuid.replace("-", ""), 16).unwrap()
 }

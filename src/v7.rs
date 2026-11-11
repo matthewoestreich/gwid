@@ -252,6 +252,14 @@ mod test {
     use super::*;
     use std::time::{Duration, UNIX_EPOCH};
 
+    fn fresh_refs() -> MonotonicRefs {
+        MonotonicRefs {
+            last_timestamp: 0,
+            last_random_a: 0,
+            last_random_b: 0,
+        }
+    }
+
     #[test]
     fn it_works() {
         let _uuid = crate::v7::generate().unwrap();
@@ -275,7 +283,7 @@ mod test {
             }
 
             let current_id = generate().unwrap();
-            let current_id_u128 = uuid_to_u128(&current_id);
+            let current_id_u128 = crate::uuid_to_u128(&current_id);
 
             assert!(
                 uuids.insert(current_id_u128),
@@ -315,8 +323,8 @@ mod test {
         let a = generate_with(ts, rand::rng().random::<u64>()).unwrap();
         let b = generate_with(ts, rand::rng().random::<u64>()).unwrap();
 
-        let a_u128 = crate::uuid_to_u128(&a).unwrap();
-        let b_u128 = crate::uuid_to_u128(&b).unwrap();
+        let a_u128 = crate::uuid_to_u128(&a);
+        let b_u128 = crate::uuid_to_u128(&b);
 
         assert!(
             a_u128 < b_u128,
@@ -342,20 +350,6 @@ mod test {
             expected, random_a,
             "expected = {expected} ; got = {random_a}"
         );
-    }
-
-    //////////
-
-    fn fresh_refs() -> MonotonicRefs {
-        MonotonicRefs {
-            last_timestamp: 0,
-            last_random_a: 0,
-            last_random_b: 0,
-        }
-    }
-
-    fn uuid_to_u128(uuid: &str) -> u128 {
-        u128::from_str_radix(&uuid.replace('-', ""), 16).unwrap()
     }
 
     #[test]
@@ -390,7 +384,7 @@ mod test {
 
         let uuid = generate_with(Duration::from_millis(timestamp as u64), 12345).unwrap();
 
-        let value = uuid_to_u128(&uuid);
+        let value = crate::uuid_to_u128(&uuid);
         let decoded_timestamp = (value >> TIMESTAMP_SHIFT) & TIMESTAMP_MASK;
 
         assert_eq!(decoded_timestamp, timestamp);
