@@ -139,7 +139,13 @@ fn generate_with(timestamp: Duration, random_b: u64) -> String {
     let random_a = derive_random_a(timestamp) & RANDOM_A_MASK;
     let random_b = random_b & RANDOM_B_MASK;
 
-    uuid_from_parts(unix_ts_ms, VERSION, random_a, VARIANT, random_b)
+    let uuid = (unix_ts_ms << TIMESTAMP_SHIFT)
+        | ((VERSION as u128) << (VERSION_SHIFT as u128))
+        | ((random_a as u128) << (RANDOM_A_SHIFT as u128))
+        | ((VARIANT as u128) << (VARIANT_SHIFT as u128))
+        | (random_b as u128);
+
+    crate::add_hyphens(uuid)
 }
 
 /// Enorce strict monotonicity across process.
@@ -162,9 +168,13 @@ fn generate_strict_with(timestamp: Duration, random_b: u64) -> Result<String, UU
 
     ensure_monotonicity(&mut unix_ts_ms, &mut random_a, &mut random_b, &mut ctx)?;
 
-    Ok(uuid_from_parts(
-        unix_ts_ms, VERSION, random_a, VARIANT, random_b,
-    ))
+    let uuid = (unix_ts_ms << TIMESTAMP_SHIFT)
+        | ((VERSION as u128) << (VERSION_SHIFT as u128))
+        | ((random_a as u128) << (RANDOM_A_SHIFT as u128))
+        | ((VARIANT as u128) << (VARIANT_SHIFT as u128))
+        | (random_b as u128);
+
+    Ok(crate::add_hyphens(uuid))
 }
 
 /// Generate `random_a` bits using additional clock  precision as to satisfy monotonic
@@ -172,22 +182,6 @@ fn generate_strict_with(timestamp: Duration, random_b: u64) -> Result<String, UU
 fn derive_random_a(from_timestamp: Duration) -> u16 {
     let sub_ms_nanos = from_timestamp.subsec_nanos() % 1_000_000;
     ((RANDOM_A_TOTAL_VALUES as u32 * sub_ms_nanos) / 1_000_000) as u16
-}
-
-fn uuid_from_parts(
-    unix_ts_ms: u128,
-    version: u8,
-    random_a: u16,
-    variant: u8,
-    random_b: u64,
-) -> String {
-    let uuid = (unix_ts_ms << TIMESTAMP_SHIFT)
-        | ((version as u128) << (VERSION_SHIFT as u128))
-        | ((random_a as u128) << (RANDOM_A_SHIFT as u128))
-        | ((variant as u128) << (VARIANT_SHIFT as u128))
-        | (random_b as u128);
-
-    crate::add_hyphens(uuid)
 }
 
 /// - Enforces nondecreasing time.
