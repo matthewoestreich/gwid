@@ -29,7 +29,10 @@
 // rand_b:
 //     The final 62 bits of pseudorandom data to provide uniqueness as per Section 6.9 and/or an optional counter to guarantee additional monotonicity as per Section 6.2. Occupies bits 66 through 127 (octets 8-15).
 
-use crate::{CLEAR_VARIANT_MASK, CLEAR_VERSION_MASK, VARIANT_SHIFT, VERSION_SHIFT};
+use crate::CLEAR_VARIANT_MASK;
+use crate::CLEAR_VERSION_MASK;
+use crate::VARIANT_SHIFT;
+use crate::VERSION_SHIFT;
 use rand::RngExt;
 use std::error;
 use std::fmt::{Display, Formatter, Result as FmtResult};
