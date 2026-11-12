@@ -81,7 +81,6 @@ mod test {
     #[test]
     fn test_uuid_v4_dash_positions() {
         let uuid = generate();
-
         for position in [8, 13, 18, 23] {
             assert_eq!(uuid.as_bytes()[position], b'-');
         }
@@ -90,27 +89,19 @@ mod test {
     #[test]
     fn test_uuid_v4_version() {
         let uuid = generate();
-
-        // Version is represented by the first nibble of the third group.
         assert_eq!(uuid.as_bytes()[14], b'4');
     }
 
     #[test]
     fn test_uuid_v4_variant() {
         let uuid = generate();
-
-        // Variant must be 10xx in binary.
-        // Therefore, the first hex digit of the fourth group
-        // must be 8, 9, A, or B.
         assert!(matches!(uuid.as_bytes()[19], b'8' | b'9' | b'a' | b'b'));
     }
 
     #[test]
     fn test_uuid_v4_valid_hexadecimal() {
         let uuid = generate();
-
         let hex: String = uuid.chars().filter(|c| *c != '-').collect();
-
         assert_eq!(hex.len(), 32);
         assert!(u128::from_str_radix(&hex, 16).is_ok());
     }
@@ -120,18 +111,18 @@ mod test {
         for _ in 0..1_000 {
             let uuid = generate();
 
-            let fourteen_bytes = uuid.as_bytes()[14];
-            let fourteen_expected = b'4';
-
-            let nineteen_bytes = uuid.as_bytes()[19];
+            let version_bytes = uuid.as_bytes()[14];
+            let variant_bytes = uuid.as_bytes()[19];
+            let expected_version = b'4';
 
             assert_eq!(
-                fourteen_bytes, fourteen_expected,
-                "expected these to equal : '{fourteen_bytes}' != '{fourteen_expected}'",
+                version_bytes, expected_version,
+                "expected these to equal : '{version_bytes}' != '{expected_version}'",
             );
+
             assert!(
-                matches!(nineteen_bytes, b'8' | b'9' | b'a' | b'b'),
-                "expected match : '{nineteen_bytes}' != '{} | {} | {} | {}'",
+                matches!(variant_bytes, b'8' | b'9' | b'a' | b'b'),
+                "expected match : '{variant_bytes}' != '{} | {} | {} | {}'",
                 b'8',
                 b'9',
                 b'a',

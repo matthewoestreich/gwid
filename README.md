@@ -4,47 +4,63 @@ Just messing around trying to implement UUIDs in Rust.
 
 [UUID RFC/spec](https://www.rfc-editor.org/info/rfc9562/)
 
-# Usage
+# UUID Version 4
 
-## UUID Version 4
+UUIDv4 is a 128-bit UUID generated using cryptographically secure random bits, providing a high degree of uniqueness without encoding a timestamp or providing chronological ordering.
 
-- Uses cryptographically secure randomness.
+## `generate()`
 
 ```rust
 use rs_uuid;
 let my_id = rs_uuid::v4::generate();
 ```
 
-## UUID Version 7
+# UUID Version 7
 
-### generate()
+UUIDv7 is a 128-bit, time-ordered UUID that embeds a Unix timestamp (milliseconds) and uses random bits for uniqueness. Its time-based structure makes UUIDs naturally sortable by creation time.
+
+| Feature                | `generate()`                        | `generate_strict()`              |
+| ---------------------- | ----------------------------------- | -------------------------------- |
+| Default                | Thread-local timestamp monotonicity | Thread-local strict monotonicity |
+| v7-global-monotonicity | Thread-local timestamp monotonicity | Global strict monotonicity       |
+
+## `generate()`
+
+Generates UUIDv7 values with sub-millisecond timestamp precision, but **does not guarantee monotonicity within the same sub-millisecond timestamp bucket**.
+
+Although thread-safe, UUIDs generated across multiple threads are not guaranteed to be globally monotonic.
+
+For example, two UUIDs generated within the same sub-millisecond bucket may be out of order:
 
 ```rust
-use rs_uuid;
-let uuidv7 = rs_uuid::v7::generate().expect("error generating");
-```
+// First UUID (greater)
+let first = "01a1d02e-eedb-7995-82da-278257b8340d";
 
-Sub-millisecond timestamp precision with **no monotonicity guarantee within the same sub-ms bucket**. Meaning, if 2 UUIDs are created within the same sub-millisecond bucket, those UUIDs are not guaranteed to be monotonic.
-
-While it is thread-safe, UUIDs generated across multiple threads are not guaranteed to have global sub-millisecond timestamp monotonicity! If you require **global, sub-millisecond timestamp precision with same sub-millisecond bucket monotonicity**, use the [`generate_strict()`](#generatestrict) method with the [global-monotonicity](#v7-global-monotonicity) feature flag!
-
-The following example displays what non-sub-millisecond monotonicity looks like, eg; the first UUID is greater than the second even though they were generated in the same sub-millisecond bucket!:
-
-```rust
-// `first` raw `u128` value  =  2169410249624819581018843866751054861
-let first  = "01a1d02e-eedb-7995-82da-278257b8340d";
-// `second` raw `u128` value =  2169410249624819580853024472479460820
+// Second UUID (smaller)
 let second = "01a1d02e-eedb-7995-808d-0ba60b4a6dd4";
 ```
 
-### generate_strict()
+If you require strict sub-millisecond monotonicity, use [`generate_strict()`](#generatestrict).
 
-Strict **thread-local** monotonicity, including when multiple UUIDs are generated within the same sub-millisecond bucket. If you require **strict global, thread-safe monotonicity**, you can enable the [global-monotonicity](#v7-global-monotonicity) feature flag.
+### Usage
 
 ```rust
 use rs_uuid;
+
+let uuidv7 = rs_uuid::v7::generate().expect("error generating");
+```
+
+## `generate_strict()`
+
+```rust
+use rs_uuid;
+
 let uuidv7 = rs_uuid::v7::generate_strict().expect("error generating strict");
 ```
+
+Guarantees **strict thread-local monotonicity**, including when multiple UUIDs are generated within the same sub-millisecond timestamp bucket.
+
+By default, monotonicity is maintained independently per thread. To guarantee **strict global monotonicity across threads**, enable the [`v7-global-monotonicity`](#v7-global-monotonicity) feature flag.
 
 # Cargo Features
 

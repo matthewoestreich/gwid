@@ -1,0 +1,4 @@
+[alias]
+t-all = "nextest run --all-features"
+t-global = "nextest run --features v7-global-monotonicity"
+t = "nextest run"
