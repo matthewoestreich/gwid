@@ -6,6 +6,9 @@ edition = "2024"
 [dependencies]
 rand = "0.10.3"
 
+[dev-dependencies]
+portable-atomic = "1.15.0"
+
 [features]
 v7-global-monotonicity = []
 default = ["v7-global-monotonicity"]
