@@ -177,7 +177,7 @@ fn uuid_from_parts(unix_ts_ms: u128, random_a: u16, random_b: u64) -> String {
 /// - Only need monotonicity if timestamps were in same sub-ms precision,
 ///   in which case, only `random_b` is incremented.
 /// - Handles overflow.
-/// - Updates global context.
+/// - Updates context.
 fn ensure_monotonicity(
     unix_ts_ms: &mut u128,
     random_a: &mut u16,
