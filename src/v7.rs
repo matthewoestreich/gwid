@@ -176,6 +176,7 @@ fn generate_strict_with(timestamp: Duration, random_b: u64) -> Result<String, UU
     let mut random_a = derive_random_a(timestamp) & RANDOM_A_MAX;
     let mut random_b = random_b & RANDOM_B_MAX;
 
+    // Offers global monotonicity
     #[cfg(feature = "v7-global-monotonicity")]
     let mut ctx = STRICT_CONTEXT
         .lock()
@@ -183,12 +184,32 @@ fn generate_strict_with(timestamp: Duration, random_b: u64) -> Result<String, UU
     #[cfg(feature = "v7-global-monotonicity")]
     ensure_strict_monotonicity(&mut unix_ts_ms, &mut random_a, &mut random_b, &mut ctx)?;
 
+    // Offers thread-local monotonicity!
     #[cfg(not(feature = "v7-global-monotonicity"))]
     STRICT_CONTEXT.with_borrow_mut(|ctx| {
         ensure_strict_monotonicity(&mut unix_ts_ms, &mut random_a, &mut random_b, ctx)
     })?;
 
     Ok(uuid_from_parts(unix_ts_ms, random_a, random_b))
+}
+
+fn generate_and<CB>(mut cb: CB) -> Result<(), UUIDv7Error>
+where
+    CB: FnMut(String),
+{
+    let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?;
+    let random_b = rand::rng().random::<u64>();
+    let mut unix_ts_ms = timestamp.as_millis() & TIMESTAMP_MAX as u128;
+    let mut random_a = derive_random_a(timestamp) & RANDOM_A_MAX;
+    let random_b = random_b & RANDOM_B_MAX;
+
+    CONTEXT.with_borrow_mut(|ctx| {
+        ensure_monotonicity(&mut unix_ts_ms, &mut random_a, random_b, ctx);
+        let uuid = uuid_from_parts(unix_ts_ms, random_a, random_b);
+        cb(uuid);
+    });
+
+    Ok(())
 }
 
 fn generate_strict_and<CB>(mut cb: CB) -> Result<(), UUIDv7Error>
@@ -209,7 +230,9 @@ where
     ensure_strict_monotonicity(&mut unix_ts_ms, &mut random_a, &mut random_b, &mut ctx)?;
 
     #[cfg(not(feature = "v7-global-monotonicity"))]
-    panic!();
+    STRICT_CONTEXT.with_borrow_mut(|ctx| {
+        ensure_strict_monotonicity(&mut unix_ts_ms, &mut random_a, &mut random_b, ctx)
+    })?;
 
     cb(uuid_from_parts(unix_ts_ms, random_a, random_b));
     Ok(())
@@ -765,6 +788,7 @@ mod test {
     // #[cfg(feature = "v7-global-monotonicity")]
     #[test]
     fn concurrent_generation_produces_global_monotonicy_old() {
+        use std::sync::Mutex;
         const THREADS: usize = 8;
         const UUIDS_PER_THREAD: usize = 100_000;
 
@@ -836,7 +860,6 @@ mod test {
         );
     }
 
-    #[cfg(feature = "v7-global-monotonicity")]
     #[test]
     fn concurrent_generation_produces_global_monotonicy() {
         use std::sync::atomic::{AtomicUsize, Ordering};
@@ -881,10 +904,26 @@ mod test {
 
         uuids.sort_unstable_by_key(|(index, _)| *index);
 
-        assert!(
-            uuids.windows(2).all(|w| w[0].1 < w[1].1),
-            "UUIDs were not globally strictly monotonic!"
-        );
+        let mut prev_index: isize = -1;
+        let mut prev: u128 = 0;
+        for (index, uuid) in &uuids {
+            assert!(
+                prev_index < *index as isize,
+                "index not in order! {prev_index} {}",
+                *index
+            );
+            assert!(
+                prev < *uuid,
+                "not globally strictly mono! {prev} is greater than {}",
+                *uuid
+            );
+            prev = *uuid;
+            prev_index = *index as isize;
+        }
+        // assert!(
+        //     uuids.windows(2).all(|w| w[0].1 < w[1].1),
+        //     "UUIDs were not globally strictly monotonic!",
+        // );
 
         let unique_uuids: HashSet<_> = uuids.iter().map(|(_, uuid)| uuid).collect();
 

@@ -11,4 +11,4 @@ portable-atomic = "1.15.0"
 
 [features]
 v7-global-monotonicity = []
-default = ["v7-global-monotonicity"]
+default = []
