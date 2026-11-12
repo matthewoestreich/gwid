@@ -29,7 +29,10 @@
 // random_c:
 //     The final 62 bits of the layout immediately following the var field to be filled with random data as per Section 6.9. Occupies bits 66 through 127 (octets 8-15).
 
-use crate::{CLEAR_VARIANT_MASK, CLEAR_VERSION_MASK, VARIANT_SHIFT, VERSION_SHIFT};
+use crate::CLEAR_VARIANT_MASK;
+use crate::CLEAR_VERSION_MASK;
+use crate::VARIANT_SHIFT;
+use crate::VERSION_SHIFT;
 use rand::RngExt as _;
 
 const VERSION: u8 = 4; // 0b100

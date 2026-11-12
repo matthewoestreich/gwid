@@ -31,12 +31,10 @@
 
 use crate::{CLEAR_VARIANT_MASK, CLEAR_VERSION_MASK, VARIANT_SHIFT, VERSION_SHIFT};
 use rand::RngExt;
-use std::{
-    error,
-    fmt::{Display, Formatter, Result as FmtResult},
-    sync::{LazyLock, Mutex},
-    time::{Duration, SystemTime, SystemTimeError, UNIX_EPOCH},
-};
+use std::error;
+use std::fmt::{Display, Formatter, Result as FmtResult};
+use std::sync::{LazyLock, Mutex};
+use std::time::{Duration, SystemTime, SystemTimeError, UNIX_EPOCH};
 
 static CONTEXT: LazyLock<Mutex<UUIDv7Context>> =
     LazyLock::new(|| Mutex::new(UUIDv7Context { ts: 0, a: 0, b: 0 }));
