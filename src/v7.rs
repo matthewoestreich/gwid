@@ -88,7 +88,6 @@ struct UUIDv7Context {
 pub fn generate() -> Result<String, UUIDv7Error> {
     let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?;
     let random_b = rand::rng().random::<u64>();
-
     Ok(generate_with(timestamp, random_b))
 }
 
@@ -116,7 +115,6 @@ pub fn generate() -> Result<String, UUIDv7Error> {
 pub fn generate_strict() -> Result<String, UUIDv7Error> {
     let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?;
     let random_b = rand::rng().random::<u64>();
-
     generate_strict_with(timestamp, random_b)
 }
 
@@ -413,7 +411,7 @@ mod test {
     }
 
     #[test]
-    fn monotonicity_increments_random_b_when_random_a_is_equal() {
+    fn monotonicity_increments_random_b_when_timestamp_and_random_a_are_unchanged() {
         let mut ctx = fresh_ctx();
 
         ctx.ts = 100;
@@ -424,7 +422,6 @@ mod test {
         let mut random_a = 100;
         let mut random_b = 150;
 
-        //ensure_monotonicity(&mut timestamp, &mut random_a, &mut random_b, &mut ctx).unwrap();
         ensure_monotonicity(&mut timestamp, &mut random_a, &mut random_b, &mut ctx).unwrap();
 
         assert_eq!(timestamp, 100);
@@ -447,28 +444,10 @@ mod test {
         let mut random_a = 101;
         let mut random_b = 50;
 
-        // ensure_monotonicity(&mut timestamp, &mut random_a, &mut random_b, &mut ctx).unwrap();
         ensure_monotonicity(&mut timestamp, &mut random_a, &mut random_b, &mut ctx).unwrap();
 
         assert_eq!(random_a, 101);
         assert_eq!(random_b, 50);
-    }
-
-    #[test]
-    fn monotonicity_increments_random_b_when_timestamp_and_random_a_match() {
-        let mut ctx = fresh_ctx();
-
-        ctx.ts = 100;
-        ctx.a = 100;
-        ctx.b = 200;
-
-        let mut timestamp = 100;
-        let mut random_a = 100;
-        let mut random_b = 50;
-
-        ensure_monotonicity(&mut timestamp, &mut random_a, &mut random_b, &mut ctx).unwrap();
-
-        assert_eq!(random_b, 201);
     }
 
     #[test]
@@ -479,7 +458,7 @@ mod test {
         ctx.a = 100;
         ctx.b = 200;
 
-        let mut timestamp = 100;
+        let mut timestamp = 101;
         let mut random_a = 100;
         let mut random_b = 300;
 
