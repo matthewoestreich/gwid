@@ -185,18 +185,18 @@ fn ensure_monotonicity(
     ctx: &mut UUIDv7Context,
 ) -> Result<(), UUIDv7Error> {
     // Enforce nondecreasing time.
-    *unix_ts_ms = ctx.ts.max(*unix_ts_ms);
+    *unix_ts_ms = u128::max(ctx.ts, *unix_ts_ms);
 
     // Only need monotonicity if timestamps were in same sub-ms precision.
     if *unix_ts_ms == ctx.ts && *random_a == ctx.a {
         // Prevent sub-ms precision from decreasing
-        *random_a = ctx.a.max(*random_a);
+        *random_a = u16::max(ctx.a, *random_a);
 
         // Only need to advance rand_b when rand_a has not advanced
         // and rand_b is not already greater than its previous value.
         if *random_a == ctx.a && *random_b <= ctx.b {
             if ctx.b < RANDOM_B_MAX {
-                *random_b = (*random_b).max(ctx.b + 1);
+                *random_b = u64::max(ctx.b + 1, *random_b);
             } else if ctx.a < RANDOM_A_MAX {
                 // rand_b is exhausted. Advance rand_a.
                 *random_a = ctx.a + 1;
