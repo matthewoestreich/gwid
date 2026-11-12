@@ -28,35 +28,37 @@
 //     The 2-bit variant field as defined by Section 4.1, set to 0b10. Occupies bits 64 and 65 of octet 8.
 // rand_b:
 //     The final 62 bits of pseudorandom data to provide uniqueness as per Section 6.9 and/or an optional counter to guarantee additional monotonicity as per Section 6.2. Occupies bits 66 through 127 (octets 8-15).
-
 use crate::CLEAR_VARIANT_MASK;
 use crate::CLEAR_VERSION_MASK;
 use crate::VARIANT_SHIFT;
 use crate::VERSION_SHIFT;
 use rand::RngExt;
-#[cfg(not(feature = "global-monotonicity"))]
 use std::cell::RefCell;
 use std::error;
 use std::fmt::Display;
 use std::fmt::Formatter;
 use std::fmt::Result as FmtResult;
-#[cfg(feature = "global-monotonicity")]
+#[cfg(feature = "v7-global-monotonicity")]
 use std::sync::LazyLock;
-#[cfg(feature = "global-monotonicity")]
+#[cfg(feature = "v7-global-monotonicity")]
 use std::sync::Mutex;
 use std::time::Duration;
 use std::time::SystemTime;
 use std::time::SystemTimeError;
 use std::time::UNIX_EPOCH;
 
-// static CONTEXT: LazyLock<Mutex<UUIDv7Context>> =
-//    LazyLock::new(|| Mutex::new(UUIDv7Context { ts: 0, a: 0, b: 0 }));
-
-#[cfg(feature = "global-monotonicity")]
-static CONTEXT: LazyLock<Mutex<UUIDv7Context>> =
+#[cfg(feature = "v7-global-monotonicity")]
+static STRICT_CONTEXT: LazyLock<Mutex<UUIDv7Context>> =
     LazyLock::new(|| Mutex::new(UUIDv7Context { ts: 0, a: 0, b: 0 }));
 
-#[cfg(not(feature = "global-monotonicity"))]
+#[cfg(not(feature = "v7-global-monotonicity"))]
+thread_local! {
+    static STRICT_CONTEXT: RefCell<UUIDv7Context> =
+        const { RefCell::new(UUIDv7Context { ts: 0, a: 0, b: 0 }) };
+}
+
+// For the relaxed `generate()` method - not behind a feature flag!
+// Used to ensure no clock drift occurs..
 thread_local! {
     static CONTEXT: RefCell<UUIDv7Context> =
         const { RefCell::new(UUIDv7Context { ts: 0, a: 0, b: 0 }) };
@@ -149,8 +151,12 @@ pub fn generate_strict() -> Result<String, UUIDv7Error> {
 /// [RFC 9562, Section 6.2](https://www.rfc-editor.org/rfc/rfc9562.html#section-6.2).
 /// The remaining 62 bits are populated using cryptographically secure randomness.
 fn generate_with(timestamp: Duration, random_b: u64) -> String {
-    let unix_ts_ms = timestamp.as_millis();
-    let random_a = derive_random_a(timestamp);
+    let mut unix_ts_ms = timestamp.as_millis();
+    let mut random_a = derive_random_a(timestamp);
+
+    CONTEXT
+        .with_borrow_mut(|ctx| ensure_monotonicity(&mut unix_ts_ms, &mut random_a, random_b, ctx));
+
     uuid_from_parts(unix_ts_ms, random_a, random_b)
 }
 
@@ -167,17 +173,18 @@ fn generate_strict_with(timestamp: Duration, mut random_b: u64) -> Result<String
     let mut unix_ts_ms = timestamp.as_millis();
     let mut random_a = derive_random_a(timestamp);
 
-    #[cfg(feature = "global-monotonicity")]
+    #[cfg(feature = "v7-global-monotonicity")]
     {
-        let mut ctx = CONTEXT
+        let mut ctx = STRICT_CONTEXT
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        ensure_monotonicity(&mut unix_ts_ms, &mut random_a, &mut random_b, &mut ctx)?;
+
+        ensure_strict_monotonicity(&mut unix_ts_ms, &mut random_a, &mut random_b, &mut ctx)?;
     }
 
-    #[cfg(not(feature = "global-monotonicity"))]
-    CONTEXT.with_borrow_mut(|ctx| {
-        ensure_monotonicity(&mut unix_ts_ms, &mut random_a, &mut random_b, ctx)
+    #[cfg(not(feature = "v7-global-monotonicity"))]
+    STRICT_CONTEXT.with_borrow_mut(|ctx| {
+        ensure_strict_monotonicity(&mut unix_ts_ms, &mut random_a, &mut random_b, ctx)
     })?;
 
     Ok(uuid_from_parts(unix_ts_ms, random_a, random_b))
@@ -200,12 +207,41 @@ fn uuid_from_parts(unix_ts_ms: u128, random_a: u16, random_b: u64) -> String {
     crate::add_hyphens(uuid)
 }
 
+/// Returns a tuple containing UUID parts where each indicie:
+/// `(unix_timestamp_ms, random_a, randomb_b)`
+pub fn uuid_to_parts(uuid: &str) -> Result<(u128, u16, u64), std::num::ParseIntError> {
+    let value = crate::uuid_to_u128(uuid)?;
+    let unix_ts_ms = (value >> TIMESTAMP_SHIFT) & TIMESTAMP_MAX as u128;
+    let random_a = (value >> RANDOM_A_SHIFT) & RANDOM_A_MAX as u128;
+    let random_b = (value >> RANDOM_A_SHIFT) & RANDOM_B_MAX as u128;
+    Ok((unix_ts_ms, random_a as u16, random_b as u64))
+}
+
+/// - Only handles clock dritt
+fn ensure_monotonicity(
+    unix_ts_ms: &mut u128,
+    random_a: &mut u16,
+    random_b: u64,
+    ctx: &mut UUIDv7Context,
+) {
+    // Enforce nondecreasing time
+    *unix_ts_ms = u128::max(ctx.ts, *unix_ts_ms);
+    if *unix_ts_ms == ctx.ts {
+        // Enforce nondecreasing sub-ms time
+        *random_a = u16::max(ctx.a, *random_a);
+    }
+
+    ctx.ts = *unix_ts_ms;
+    ctx.a = *random_a;
+    ctx.b = random_b;
+}
+
 /// - Enforces nondecreasing time.
 /// - Only need monotonicity if timestamps were in same sub-ms precision,
 ///   in which case, only `random_b` is incremented.
 /// - Handles overflow.
 /// - Updates context.
-fn ensure_monotonicity(
+fn ensure_strict_monotonicity(
     unix_ts_ms: &mut u128,
     random_a: &mut u16,
     random_b: &mut u64,
@@ -312,7 +348,7 @@ mod test {
             }
 
             let current_id = generate_strict().unwrap();
-            let current_id_u128 = crate::uuid_to_u128(&current_id);
+            let current_id_u128 = crate::uuid_to_u128_unchecked(&current_id);
 
             assert!(
                 uuids.insert(current_id_u128),
@@ -326,6 +362,44 @@ mod test {
             prev = current_id_u128;
             println!("{current_id}");
         }
+    }
+
+    #[test]
+    fn non_monotonic_clock_drift_timestamp() {
+        let mut ctx = UUIDv7Context {
+            ts: 100,
+            a: 100,
+            b: 100,
+        };
+
+        let mut ts = 99;
+        let mut a = 100;
+        let b = 100;
+
+        ensure_monotonicity(&mut ts, &mut a, b, &mut ctx);
+
+        assert_eq!(ts, 100);
+        assert_eq!(a, 100);
+        assert_eq!(b, 100);
+    }
+
+    #[test]
+    fn non_monotonic_clock_drift_random_a_sub_ms() {
+        let mut ctx = UUIDv7Context {
+            ts: 100,
+            a: 100,
+            b: 100,
+        };
+
+        let mut ts = 100;
+        let mut a = 99;
+        let b = 100;
+
+        ensure_monotonicity(&mut ts, &mut a, b, &mut ctx);
+
+        assert_eq!(ts, 100);
+        assert_eq!(a, 100);
+        assert_eq!(b, 100);
     }
 
     #[test]
@@ -350,8 +424,8 @@ mod test {
         let a = generate_strict_with(ts, rand::rng().random::<u64>()).unwrap();
         let b = generate_strict_with(ts, rand::rng().random::<u64>()).unwrap();
 
-        let a_u128 = crate::uuid_to_u128(&a);
-        let b_u128 = crate::uuid_to_u128(&b);
+        let a_u128 = crate::uuid_to_u128_unchecked(&a);
+        let b_u128 = crate::uuid_to_u128_unchecked(&b);
 
         println!("a_uuid={a} a_u128={a_u128}\nb_uuid={b} b_u128={b_u128}",);
         assert!(
@@ -416,7 +490,7 @@ mod test {
             .unwrap();
         let uuid = generate_strict_with(timestamp, 123456700).unwrap();
         // let uuid = generate_with(timestamp, 12345);
-        let value = crate::uuid_to_u128(&uuid);
+        let value = crate::uuid_to_u128_unchecked(&uuid);
         let decoded_timestamp_ms = (value >> TIMESTAMP_SHIFT) & TIMESTAMP_MAX as u128;
         let decoded_random_a = (value >> RANDOM_A_SHIFT) & RANDOM_A_MAX as u128;
         let original_sub_ms_ns = (timestamp.subsec_nanos() % 1_000_000) as u128;
@@ -454,7 +528,7 @@ mod test {
 
         let uuid = generate_strict_with(Duration::from_millis(timestamp as u64), 12345).unwrap();
 
-        let value = crate::uuid_to_u128(&uuid);
+        let value = crate::uuid_to_u128_unchecked(&uuid);
         let decoded_timestamp = (value >> TIMESTAMP_SHIFT) & TIMESTAMP_MAX as u128;
 
         assert_eq!(decoded_timestamp, timestamp);
@@ -490,7 +564,7 @@ mod test {
         let mut random_a = 100;
         let mut random_b = 150;
 
-        ensure_monotonicity(&mut timestamp, &mut random_a, &mut random_b, &mut ctx).unwrap();
+        ensure_strict_monotonicity(&mut timestamp, &mut random_a, &mut random_b, &mut ctx).unwrap();
 
         assert_eq!(timestamp, 100);
         assert_eq!(random_a, 100);
@@ -512,7 +586,7 @@ mod test {
         let mut random_a = 101;
         let mut random_b = 50;
 
-        ensure_monotonicity(&mut timestamp, &mut random_a, &mut random_b, &mut ctx).unwrap();
+        ensure_strict_monotonicity(&mut timestamp, &mut random_a, &mut random_b, &mut ctx).unwrap();
 
         assert_eq!(random_a, 101);
         assert_eq!(random_b, 50);
@@ -530,7 +604,7 @@ mod test {
         let mut random_a = 100;
         let mut random_b = 300;
 
-        ensure_monotonicity(&mut timestamp, &mut random_a, &mut random_b, &mut ctx).unwrap();
+        ensure_strict_monotonicity(&mut timestamp, &mut random_a, &mut random_b, &mut ctx).unwrap();
 
         assert_eq!(random_b, 300);
     }
@@ -547,7 +621,7 @@ mod test {
         let mut random_a = 101;
         let mut random_b = 50;
 
-        ensure_monotonicity(&mut timestamp, &mut random_a, &mut random_b, &mut ctx).unwrap();
+        ensure_strict_monotonicity(&mut timestamp, &mut random_a, &mut random_b, &mut ctx).unwrap();
 
         assert_eq!(random_b, 50);
     }
@@ -564,7 +638,7 @@ mod test {
         let mut random_a = 100;
         let mut random_b = 200;
 
-        ensure_monotonicity(&mut timestamp, &mut random_a, &mut random_b, &mut ctx).unwrap();
+        ensure_strict_monotonicity(&mut timestamp, &mut random_a, &mut random_b, &mut ctx).unwrap();
 
         assert_eq!(timestamp, 100);
         assert_eq!(random_a, 100);
@@ -583,14 +657,14 @@ mod test {
         let mut random_a = 10;
         let mut random_b = 20;
 
-        ensure_monotonicity(&mut timestamp, &mut random_a, &mut random_b, &mut ctx).unwrap();
+        ensure_strict_monotonicity(&mut timestamp, &mut random_a, &mut random_b, &mut ctx).unwrap();
 
         assert_eq!(timestamp, 101);
         assert_eq!(random_a, 10);
         assert_eq!(random_b, 20);
     }
 
-    #[cfg(feature = "global-monotonicity")]
+    #[cfg(feature = "v7-global-monotonicity")]
     #[test]
     // This launches 8 threads, each generating 10,000 UUIDs simultaneously, then verifies that all 80,000 UUIDs are unique.
     fn concurrent_generation_produces_unique_uuids() {
@@ -630,7 +704,7 @@ mod test {
     }
 
     #[test]
-    #[cfg(feature = "global-monotonicity")]
+    #[cfg(feature = "v7-global-monotonicity")]
     // This specifically stresses monotonicity logic when multiple threads generate UUIDs using the exact same timestamp.
     fn concurrent_generation_with_same_timestamp_is_unique() {
         use std::{
