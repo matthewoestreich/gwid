@@ -56,7 +56,7 @@ const RANDOM_B_MAX: u64 = (1 << RANDOM_B_BITS) - 1;
 const TIMESTAMP_MAX: u64 = (1 << TIMESTAMP_BITS) - 1;
 
 const TIMESTAMP_SHIFT: u8 = 80;
-const RANDOM_A_SHIFT: u8 = 64;
+const RANDOM_A_SHIFT: u128 = 64;
 
 const VERSION: u8 = 7; // 0b111
 const VARIANT: u8 = 2; // 0b10
@@ -171,9 +171,9 @@ fn derive_random_a(from_timestamp: Duration) -> u16 {
 
 fn uuid_from_parts(unix_ts_ms: u128, random_a: u16, random_b: u64) -> String {
     let uuid = (unix_ts_ms << TIMESTAMP_SHIFT) & CLEAR_VERSION_MASK
-        | ((VERSION as u128) << (VERSION_SHIFT as u128))
-        | ((random_a as u128) << (RANDOM_A_SHIFT as u128)) & CLEAR_VARIANT_MASK
-        | ((VARIANT as u128) << (VARIANT_SHIFT as u128))
+        | ((VERSION as u128) << VERSION_SHIFT)
+        | ((random_a as u128) << RANDOM_A_SHIFT) & CLEAR_VARIANT_MASK
+        | ((VARIANT as u128) << VARIANT_SHIFT)
         | (random_b as u128);
 
     crate::add_hyphens(uuid)

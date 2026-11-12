@@ -11,8 +11,8 @@ pub(crate) const CLEAR_VERSION_MASK: u128 = 0xFFFFFFFFFFFF0FFFFFFFFFFFFFFFFFFF;
 // 11111111 11111111 11111111 11111111 11111111 11111111 11111111 00111111 11111111 11111111 11111111 11111111 11111111 11111111 11111111 11111111
 pub(crate) const CLEAR_VARIANT_MASK: u128 = 0xFFFFFFFFFFFFFFFF3FFFFFFFFFFFFFFF;
 
-pub(crate) const VERSION_SHIFT: u8 = 76;
-pub(crate) const VARIANT_SHIFT: u8 = 62;
+pub(crate) const VERSION_SHIFT: u128 = 76;
+pub(crate) const VARIANT_SHIFT: u128 = 62;
 
 /// Formats `n` as hex and inserts hyphens at appropriate indicies.
 pub(crate) fn add_hyphens(n: u128) -> String {

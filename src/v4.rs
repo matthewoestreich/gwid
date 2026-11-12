@@ -45,8 +45,8 @@ pub fn generate() -> String {
 
 fn generate_with(random_bits: u128) -> String {
     let uuid = (random_bits & CLEAR_VERSION_MASK & CLEAR_VARIANT_MASK)
-        | ((VERSION as u128) << (VERSION_SHIFT as u128))
-        | ((VARIANT as u128) << (VARIANT_SHIFT as u128));
+        | ((VERSION as u128) << VERSION_SHIFT)
+        | ((VARIANT as u128) << VARIANT_SHIFT);
 
     crate::add_hyphens(uuid)
 }
