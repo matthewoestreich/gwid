@@ -32,14 +32,7 @@ When enabled (default), UUIDv7 generation uses a shared `Mutex` to synchronize g
 
 When disabled, each thread maintains its own independent generator state using thread-local storage. This eliminates mutex overhead and can improve single-threaded and concurrent generation performance, but **monotonicity is only guaranteed within each individual thread**, not across threads.
 
-Disable the feature in your `Cargo.toml`:
-
-```toml
-[dependencies]
-uuid-rs = { version = "0.1", default-features = false }
-```
-
-Enable it explicitly:
+Enable the feature in your `Cargo.toml`:
 
 ```toml
 [dependencies]
