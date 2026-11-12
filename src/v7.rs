@@ -34,13 +34,33 @@ use crate::CLEAR_VERSION_MASK;
 use crate::VARIANT_SHIFT;
 use crate::VERSION_SHIFT;
 use rand::RngExt;
+#[cfg(not(feature = "global-monotonicity"))]
+use std::cell::RefCell;
 use std::error;
-use std::fmt::{Display, Formatter, Result as FmtResult};
-use std::sync::{LazyLock, Mutex};
-use std::time::{Duration, SystemTime, SystemTimeError, UNIX_EPOCH};
+use std::fmt::Display;
+use std::fmt::Formatter;
+use std::fmt::Result as FmtResult;
+#[cfg(feature = "global-monotonicity")]
+use std::sync::LazyLock;
+#[cfg(feature = "global-monotonicity")]
+use std::sync::Mutex;
+use std::time::Duration;
+use std::time::SystemTime;
+use std::time::SystemTimeError;
+use std::time::UNIX_EPOCH;
 
+// static CONTEXT: LazyLock<Mutex<UUIDv7Context>> =
+//    LazyLock::new(|| Mutex::new(UUIDv7Context { ts: 0, a: 0, b: 0 }));
+
+#[cfg(feature = "global-monotonicity")]
 static CONTEXT: LazyLock<Mutex<UUIDv7Context>> =
     LazyLock::new(|| Mutex::new(UUIDv7Context { ts: 0, a: 0, b: 0 }));
+
+#[cfg(not(feature = "global-monotonicity"))]
+thread_local! {
+    static CONTEXT: RefCell<UUIDv7Context> =
+        const { RefCell::new(UUIDv7Context { ts: 0, a: 0, b: 0 }) };
+}
 
 const RANDOM_A_BITS: u8 = 12;
 const RANDOM_B_BITS: u8 = 62;
@@ -147,11 +167,18 @@ fn generate_strict_with(timestamp: Duration, mut random_b: u64) -> Result<String
     let mut unix_ts_ms = timestamp.as_millis();
     let mut random_a = derive_random_a(timestamp);
 
-    let mut ctx = CONTEXT
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    #[cfg(feature = "global-monotonicity")]
+    {
+        let mut ctx = CONTEXT
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        ensure_monotonicity(&mut unix_ts_ms, &mut random_a, &mut random_b, &mut ctx)?;
+    }
 
-    ensure_monotonicity(&mut unix_ts_ms, &mut random_a, &mut random_b, &mut ctx)?;
+    #[cfg(not(feature = "global-monotonicity"))]
+    CONTEXT.with_borrow_mut(|ctx| {
+        ensure_monotonicity(&mut unix_ts_ms, &mut random_a, &mut random_b, ctx)
+    })?;
 
     Ok(uuid_from_parts(unix_ts_ms, random_a, random_b))
 }
@@ -160,7 +187,7 @@ fn generate_strict_with(timestamp: Duration, mut random_b: u64) -> Result<String
 /// constraints following **Method 3** described in [RFC 9562, Section 6.2](https://www.rfc-editor.org/rfc/rfc9562.html#section-6.2)
 fn derive_random_a(from_timestamp: Duration) -> u16 {
     let sub_ms_nanos = from_timestamp.subsec_nanos() % 1_000_000;
-    ((RANDOM_A_TOTAL_VALUES as u32 * sub_ms_nanos) / 1_000_000) as u16
+    ((RANDOM_A_TOTAL_VALUES as u64 * sub_ms_nanos as u64) / 1_000_000) as u16
 }
 
 fn uuid_from_parts(unix_ts_ms: u128, random_a: u16, random_b: u64) -> String {
@@ -188,7 +215,7 @@ fn ensure_monotonicity(
     *unix_ts_ms = u128::max(ctx.ts, *unix_ts_ms);
 
     // Only need monotonicity if timestamps were in same sub-ms precision.
-    if *unix_ts_ms == ctx.ts && *random_a == ctx.a {
+    if *unix_ts_ms == ctx.ts && *random_a <= ctx.a {
         // Prevent sub-ms precision from decreasing
         *random_a = u16::max(ctx.a, *random_a);
 
@@ -381,6 +408,47 @@ mod test {
     }
 
     #[test]
+    fn sub_ms_precision() {
+        // let timestamp = Duration::from_millis(1_700_000_000_000) + Duration::from_nanos(123_456);
+        let jan_1_2023_12_34_56_1234567 = UNIX_EPOCH + Duration::new(1_672_576_496, 123_456_700);
+        let timestamp = jan_1_2023_12_34_56_1234567
+            .duration_since(UNIX_EPOCH)
+            .unwrap();
+        let uuid = generate_strict_with(timestamp, 123456700).unwrap();
+        // let uuid = generate_with(timestamp, 12345);
+        let value = crate::uuid_to_u128(&uuid);
+        let decoded_timestamp_ms = (value >> TIMESTAMP_SHIFT) & TIMESTAMP_MAX as u128;
+        let decoded_random_a = (value >> RANDOM_A_SHIFT) & RANDOM_A_MAX as u128;
+        let original_sub_ms_ns = (timestamp.subsec_nanos() % 1_000_000) as u128;
+        let decoded_sub_ms_ns = decoded_random_a * 1_000_000 / RANDOM_A_TOTAL_VALUES as u128;
+
+        let original_ns = timestamp.as_nanos();
+        let decoded_ns = decoded_timestamp_ms * 1_000_000 + decoded_sub_ms_ns;
+        let precision_loss_ns = original_sub_ms_ns - decoded_sub_ms_ns;
+        println!("Original:");
+        println!("  timestamp: {} ms", timestamp.as_millis());
+        println!("  timestamp: {original_ns} ns");
+        println!("  sub-ms:    {original_sub_ms_ns} ns");
+        println!("Decoded:");
+        println!("  timestamp: {decoded_timestamp_ms} ms");
+        println!("  timestamp: {decoded_ns} ns");
+        println!("  sub-ms:    {decoded_sub_ms_ns} ns");
+        println!("  random_a:  {decoded_random_a}");
+        println!("Precision loss: {precision_loss_ns} ns");
+
+        assert_eq!(decoded_timestamp_ms, timestamp.as_millis());
+
+        // The decoded value should never exceed the original.
+        assert!(decoded_sub_ms_ns <= original_sub_ms_ns);
+
+        // The difference should be less than one quantization step.
+        assert!(
+            original_sub_ms_ns - decoded_sub_ms_ns
+                < 1_000_000_u128.div_ceil(RANDOM_A_TOTAL_VALUES as u128)
+        );
+    }
+
+    #[test]
     fn timestamp_is_encoded_correctly() {
         let timestamp = 1_700_000_000_000u128;
 
@@ -522,6 +590,7 @@ mod test {
         assert_eq!(random_b, 20);
     }
 
+    #[cfg(feature = "global-monotonicity")]
     #[test]
     // This launches 8 threads, each generating 10,000 UUIDs simultaneously, then verifies that all 80,000 UUIDs are unique.
     fn concurrent_generation_produces_unique_uuids() {
@@ -561,6 +630,7 @@ mod test {
     }
 
     #[test]
+    #[cfg(feature = "global-monotonicity")]
     // This specifically stresses monotonicity logic when multiple threads generate UUIDs using the exact same timestamp.
     fn concurrent_generation_with_same_timestamp_is_unique() {
         use std::{

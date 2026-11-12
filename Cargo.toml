@@ -5,3 +5,7 @@ edition = "2024"
 
 [dependencies]
 rand = "0.10.3"
+
+[features]
+global-monotonicity = []
+default = []

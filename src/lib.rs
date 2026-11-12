@@ -1,5 +1,3 @@
-use std::fmt::Binary;
-
 pub mod v4;
 pub mod v7;
 
@@ -33,7 +31,7 @@ pub(crate) fn add_hyphens(n: u128) -> String {
 
 // Helper function to print bits
 #[allow(dead_code)]
-pub(crate) fn print_bits<T: Binary>(value: T) {
+pub(crate) fn print_bits<T: std::fmt::Binary>(value: T) {
     let width = std::mem::size_of::<T>() * 8;
     let bits = format!("{value:0width$b}");
     for (i, byte) in bits.as_bytes().chunks(8).enumerate() {
