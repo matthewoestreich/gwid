@@ -37,6 +37,8 @@ use std::{
     time::{Duration, SystemTime, SystemTimeError, UNIX_EPOCH},
 };
 
+use crate::{CLEAR_VARIANT_MASK, CLEAR_VERSION_MASK, VARIANT_SHIFT, VERSION_SHIFT};
+
 static CONTEXT: LazyLock<Mutex<UUIDv7Context>> =
     LazyLock::new(|| Mutex::new(UUIDv7Context { ts: 0, a: 0, b: 0 }));
 
@@ -47,16 +49,14 @@ const TIMESTAMP_BITS: u8 = 48;
 const RANDOM_A_TOTAL_VALUES: u16 = 1 << RANDOM_A_BITS;
 
 /// 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00001111 11111111
-const RANDOM_A_MASK: u16 = RANDOM_A_TOTAL_VALUES - 1;
+const RANDOM_A_MAX: u16 = RANDOM_A_TOTAL_VALUES - 1;
 /// 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00111111 11111111 11111111 11111111 11111111 11111111 11111111 11111111
-const RANDOM_B_MASK: u64 = (1 << RANDOM_B_BITS) - 1;
+const RANDOM_B_MAX: u64 = (1 << RANDOM_B_BITS) - 1;
 /// 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 11111111 11111111 11111111 11111111 11111111 11111111
-const TIMESTAMP_MASK: u64 = (1 << TIMESTAMP_BITS) - 1;
+const TIMESTAMP_MAX: u64 = (1 << TIMESTAMP_BITS) - 1;
 
 const TIMESTAMP_SHIFT: u8 = 80;
 const RANDOM_A_SHIFT: u8 = 64;
-const VERSION_SHIFT: u8 = 76;
-const VARIANT_SHIFT: u8 = 62;
 
 const VERSION: u8 = 7; // 0b111
 const VARIANT: u8 = 2; // 0b10
@@ -135,17 +135,9 @@ pub fn generate_strict() -> Result<String, UUIDv7Error> {
 /// [RFC 9562, Section 6.2](https://www.rfc-editor.org/rfc/rfc9562.html#section-6.2).
 /// The remaining 62 bits are populated using cryptographically secure randomness.
 fn generate_with(timestamp: Duration, random_b: u64) -> String {
-    let unix_ts_ms = timestamp.as_millis() & TIMESTAMP_MASK as u128;
-    let random_a = derive_random_a(timestamp) & RANDOM_A_MASK;
-    let random_b = random_b & RANDOM_B_MASK;
-
-    let uuid = (unix_ts_ms << TIMESTAMP_SHIFT)
-        | ((VERSION as u128) << (VERSION_SHIFT as u128))
-        | ((random_a as u128) << (RANDOM_A_SHIFT as u128))
-        | ((VARIANT as u128) << (VARIANT_SHIFT as u128))
-        | (random_b as u128);
-
-    crate::add_hyphens(uuid)
+    let unix_ts_ms = timestamp.as_millis();
+    let random_a = derive_random_a(timestamp);
+    uuid_from_parts(unix_ts_ms, random_a, random_b)
 }
 
 /// Enorce strict monotonicity across process.
@@ -157,10 +149,9 @@ fn generate_with(timestamp: Duration, random_b: u64) -> String {
 ///
 /// In order to be strictly monotonic, we incorporate Method 2 described in
 /// [RFC 9562, Section 6.2](https://www.rfc-editor.org/rfc/rfc9562.html#section-6.2).
-fn generate_strict_with(timestamp: Duration, random_b: u64) -> Result<String, UUIDv7Error> {
-    let mut unix_ts_ms = timestamp.as_millis() & TIMESTAMP_MASK as u128;
-    let mut random_a = derive_random_a(timestamp) & RANDOM_A_MASK;
-    let mut random_b = random_b & RANDOM_B_MASK;
+fn generate_strict_with(timestamp: Duration, mut random_b: u64) -> Result<String, UUIDv7Error> {
+    let mut unix_ts_ms = timestamp.as_millis();
+    let mut random_a = derive_random_a(timestamp);
 
     let mut ctx = CONTEXT
         .lock()
@@ -168,13 +159,7 @@ fn generate_strict_with(timestamp: Duration, random_b: u64) -> Result<String, UU
 
     ensure_monotonicity(&mut unix_ts_ms, &mut random_a, &mut random_b, &mut ctx)?;
 
-    let uuid = (unix_ts_ms << TIMESTAMP_SHIFT)
-        | ((VERSION as u128) << (VERSION_SHIFT as u128))
-        | ((random_a as u128) << (RANDOM_A_SHIFT as u128))
-        | ((VARIANT as u128) << (VARIANT_SHIFT as u128))
-        | (random_b as u128);
-
-    Ok(crate::add_hyphens(uuid))
+    Ok(uuid_from_parts(unix_ts_ms, random_a, random_b))
 }
 
 /// Generate `random_a` bits using additional clock  precision as to satisfy monotonic
@@ -182,6 +167,16 @@ fn generate_strict_with(timestamp: Duration, random_b: u64) -> Result<String, UU
 fn derive_random_a(from_timestamp: Duration) -> u16 {
     let sub_ms_nanos = from_timestamp.subsec_nanos() % 1_000_000;
     ((RANDOM_A_TOTAL_VALUES as u32 * sub_ms_nanos) / 1_000_000) as u16
+}
+
+fn uuid_from_parts(unix_ts_ms: u128, random_a: u16, random_b: u64) -> String {
+    let uuid = (unix_ts_ms << TIMESTAMP_SHIFT) & CLEAR_VERSION_MASK
+        | ((VERSION as u128) << (VERSION_SHIFT as u128))
+        | ((random_a as u128) << (RANDOM_A_SHIFT as u128)) & CLEAR_VARIANT_MASK
+        | ((VARIANT as u128) << (VARIANT_SHIFT as u128))
+        | (random_b as u128);
+
+    crate::add_hyphens(uuid)
 }
 
 /// - Enforces nondecreasing time.
@@ -206,13 +201,13 @@ fn ensure_monotonicity(
         // Only need to advance rand_b when rand_a has not advanced
         // and rand_b is not already greater than its previous value.
         if *random_a == ctx.a && *random_b <= ctx.b {
-            if ctx.b < RANDOM_B_MASK {
+            if ctx.b < RANDOM_B_MAX {
                 *random_b = (*random_b).max(ctx.b + 1);
-            } else if ctx.a < RANDOM_A_MASK {
+            } else if ctx.a < RANDOM_A_MAX {
                 // rand_b is exhausted. Advance rand_a.
                 *random_a = ctx.a + 1;
                 *random_b = 0;
-            } else if ctx.ts < TIMESTAMP_MASK as u128 {
+            } else if ctx.ts < TIMESTAMP_MAX as u128 {
                 // Both random fields are exhausted. Advance the timestamp.
                 *unix_ts_ms = ctx.ts + 1;
                 *random_a = 0;
@@ -398,7 +393,7 @@ mod test {
         let uuid = generate_strict_with(Duration::from_millis(timestamp as u64), 12345).unwrap();
 
         let value = crate::uuid_to_u128(&uuid);
-        let decoded_timestamp = (value >> TIMESTAMP_SHIFT) & TIMESTAMP_MASK as u128;
+        let decoded_timestamp = (value >> TIMESTAMP_SHIFT) & TIMESTAMP_MAX as u128;
 
         assert_eq!(decoded_timestamp, timestamp);
     }
@@ -539,7 +534,7 @@ mod test {
 
         ctx.ts = 100;
         ctx.a = 4095;
-        ctx.b = RANDOM_B_MASK;
+        ctx.b = RANDOM_B_MAX;
 
         let mut timestamp = 101;
         let mut random_a = 10;
