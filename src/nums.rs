@@ -93,18 +93,13 @@ pub mod math_random {
         #[test]
         fn matches_chrome() {
             let mut mr = MathRandom::initialize(Some(1337));
-            // During startup Chrome seems to call Math.random 8 times,
-            // so we also need to call it 8 times.
+            // During startup Chrome seems to call Math.random 8 times, so we also need to call it 8 times.
             for _ in 0..8 {
-                println!("burning value {}", mr.random_double());
+                _ = mr.random_double();
             }
 
             let mut rands = [0.0; 10];
-            (0..10).for_each(|i| {
-                let rand = mr.random_double();
-                rands[i] = rand;
-                println!("{rand}");
-            });
+            (0..10).for_each(|i| rands[i] = mr.random_double());
 
             let expected = [
                 0.1623809348128048,
@@ -120,17 +115,6 @@ pub mod math_random {
             ];
 
             assert_eq!(expected, rands);
-        }
-
-        #[test]
-        fn math_rand_foo() {
-            use rand::RngExt;
-            let mut rng = MathRandom::initialize(Some(rand::rng().random()));
-            println!("MathRandom  = {}", rng.random() & ((1 << 62) - 1));
-            println!(
-                "rand::rng() = {}",
-                rand::rng().random::<u64>() & ((1 << 62) - 1)
-            );
         }
     }
 }
@@ -199,19 +183,6 @@ pub mod utils {
             h = h.wrapping_mul(0xC4CEB9FE1A85EC53u64);
             h ^= h >> 33;
             h
-        }
-    }
-
-    #[cfg(test)]
-    mod test {
-        use super::*;
-
-        #[test]
-        fn rng_foo() {
-            let mut rng = RandomNumberGenerator::new(1337);
-            for _ in 0..30 {
-                println!("{}", rng.next_double());
-            }
         }
     }
 }
