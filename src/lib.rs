@@ -5,18 +5,16 @@ pub(crate) mod nums;
 
 /// Formats `n` as hex and inserts hyphens at appropriate indicies.
 pub fn add_hyphens(n: u128) -> String {
-    // const FIRST_HYPHEN_INDEX: usize = 8;
-    // const SECOND_HYPHEN_INDEX: usize = 12;
-    // const THIRD_HYPHEN_INDEX: usize = 16;
-    // const FOURTH_HYPHEN_INDEX: usize = 20;
-
     let uuid = format!("{n:032x}");
-
     format!(
         "{}-{}-{}-{}-{}",
+        // 8 is index of first hyphen
         &uuid[..8],
+        // 12 is index of second hyphen
         &uuid[8..12],
+        // 16 is index of third hyphen
         &uuid[12..16],
+        // 20 is index of fourth hyphen
         &uuid[16..20],
         &uuid[20..]
     )
