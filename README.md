@@ -21,6 +21,8 @@ UUIDv7 is a 128-bit, time-ordered UUID that embeds a Unix timestamp (millisecond
 
 [RFC 9562](https://www.rfc-editor.org/info/rfc9562/) does not require the random bits to be cryptographically secure, so we use a pseudorandom number generator for randomness. **If you want to use cryptographically secure bits for randomness, enable the [`v7-crypto-rand`](#v7-crypto-rand) feature flag!**
 
+## Monotonic Precision
+
 | Feature                | `generate()`                        | `generate_strict()`              |
 | ---------------------- | ----------------------------------- | -------------------------------- |
 | Default                | Thread-local timestamp monotonicity | Thread-local strict monotonicity |
