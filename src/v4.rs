@@ -40,15 +40,21 @@ const VARIANT: u8 = 2; // 0b10
 
 /// Generates a UUIDv4 using a cryptographically secure random number generator.
 pub fn generate() -> String {
-    generate_with(rand::rng().random::<u128>())
+    generate_with(generate_raw())
+}
+
+pub fn generate_raw() -> u128 {
+    generate_raw_with(rand::rng().random())
+}
+
+fn generate_raw_with(random_bits: u128) -> u128 {
+    (random_bits & CLEAR_VERSION_MASK & CLEAR_VARIANT_MASK)
+        | ((VERSION as u128) << VERSION_SHIFT)
+        | ((VARIANT as u128) << VARIANT_SHIFT)
 }
 
 fn generate_with(random_bits: u128) -> String {
-    let uuid = (random_bits & CLEAR_VERSION_MASK & CLEAR_VARIANT_MASK)
-        | ((VERSION as u128) << VERSION_SHIFT)
-        | ((VARIANT as u128) << VARIANT_SHIFT);
-
-    crate::add_hyphens(uuid)
+    crate::add_hyphens(generate_raw_with(random_bits))
 }
 
 #[cfg(test)]

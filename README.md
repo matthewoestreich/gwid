@@ -8,13 +8,25 @@ Just messing around trying to implement UUIDs in Rust.
 
 UUIDv4 is a 128-bit UUID generated using cryptographically secure random bits, providing a high degree of uniqueness without encoding a timestamp or providing chronological ordering.
 
-## `generate()`
+## `generate() -> String`
 
 **Usage**
 
 ```rust
 use uuid_rs;
 let my_id = uuid_rs::v4::generate();
+```
+
+## `generate_raw() -> u128`
+
+Returns the raw `u128` UUID. If you need to format it as `String` with hyphens, please use [`add_hyphens`](#add_hyphensuuid-u128).
+
+**Usage**
+
+```rust
+use uuid_rs;
+let uuid = uuid_rs::v4::generate_raw();
+let with_hyphens = uuid_rs::add_hyphens(uuid);
 ```
 
 # UUID Version 7
@@ -43,7 +55,6 @@ If you require strict sub-millisecond monotonicity, use [`generate_strict()`](#g
 
 ```rust
 use uuid_rs;
-
 let uuidv7 = uuid_rs::v7::generate().expect("error generating");
 ```
 
@@ -57,7 +68,6 @@ Guarantees **[strict](#monotonic-precision) thread-local monotonicity**. By defa
 
 ```rust
 use uuid_rs;
-
 let uuidv7 = uuid_rs::v7::generate_strict().expect("error generating strict");
 ```
 
@@ -69,17 +79,6 @@ Behaves exactly like `generate()`, but returns the raw `u128` UUID. If you need 
 
 Behaves exactly like `generate_strict()`, but returns the raw `u128` UUID. If you need to format the raw UUID as a `String` with hyphens, please use [`add_hyphens`](#add_hyphensuuid-u128).
 
-## `add_hyphens(uuid: u128) -> String`
-
-Helper function to format a raw `u128` UUID to `String` with hyphens.
-
-```rust
-use uuid_rs;
-
-let uuid = uuid_rs::v7::generate_raw().unwrap();
-let formatted = uuid_rs::add_hyphens(uuid);
-```
-
 ## Monotonic Precision
 
 | Feature                | `generate()`                         | `generate_strict()`               |
@@ -89,6 +88,18 @@ let formatted = uuid_rs::add_hyphens(uuid);
 
 \*_timestamp_ - guarantees sub-millisecond timestamp precision, but **does not guarantee monotonicity within the same sub-millisecond timestamp bucket**
 <br>\*_strict_ - guarantees monotonicity within same sub-millisecond timestamp bucket
+
+# Helper Functions
+
+## `add_hyphens(uuid: u128) -> String`
+
+Helper function to format a raw `u128` UUID to `String` with hyphens.
+
+```rust
+use uuid_rs;
+let uuid = uuid_rs::v7::generate_raw().unwrap();
+let with_hyphens = uuid_rs::add_hyphens(uuid);
+```
 
 # Cargo Features
 
