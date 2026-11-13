@@ -43,42 +43,46 @@ pub mod math_random {
                     .as_secs(),
             };
 
+            let state = State {
+                s0: RandomNumberGenerator::murmurhash3(seed),
+                s1: RandomNumberGenerator::murmurhash3(!seed),
+            };
+
             let mut this = Self {
                 state: State::default(),
                 cache_index: 0,
                 cache: [0; Self::K_CACHE_SIZE as usize],
             };
 
-            this.state.s0 = RandomNumberGenerator::murmurhash3(seed);
-            this.state.s1 = RandomNumberGenerator::murmurhash3(!seed);
+            this.state = state;
             this.refill_cache();
-
             this
         }
 
         pub fn random_double(&mut self) -> f64 {
-            if self.cache_index == 0 {
-                self.refill_cache();
-            }
-            self.cache_index -= 1;
-            RandomNumberGenerator::to_double(self.cache[self.cache_index])
+            RandomNumberGenerator::to_double(self.current_cached())
         }
 
         pub fn random_u64(&mut self) -> u64 {
+            self.current_cached()
+        }
+
+        fn refill_cache(&mut self) {
+            for i in (0usize..=(Self::K_CACHE_SIZE - 1) as usize).rev() {
+                let s = &mut self.state;
+                let random = RandomNumberGenerator::xorshift128(&mut s.s0, &mut s.s1);
+                self.cache[i] = random;
+            }
+            self.cache_index = Self::K_CACHE_SIZE as usize;
+        }
+
+        /// Gets element from cache via current cache index
+        fn current_cached(&mut self) -> u64 {
             if self.cache_index == 0 {
                 self.refill_cache();
             }
             self.cache_index -= 1;
             self.cache[self.cache_index]
-        }
-
-        fn refill_cache(&mut self) {
-            for i in (0usize..=(Self::K_CACHE_SIZE - 1) as usize).rev() {
-                let random =
-                    RandomNumberGenerator::xorshift128(&mut self.state.s0, &mut self.state.s1);
-                self.cache[i] = random;
-            }
-            self.cache_index = Self::K_CACHE_SIZE as usize;
         }
 
         fn reverse_to_double(dbl: f64) -> u64 {
