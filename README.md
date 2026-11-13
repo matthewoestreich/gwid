@@ -12,7 +12,7 @@ UUIDv4 is a 128-bit UUID generated using cryptographically secure random bits, p
 
 ```rust
 use gwid;
-let my_id = gwid::v4::generate();
+let uuid = gwid::v4::generate();
 ```
 
 ## `generate_raw() -> u128`
