@@ -10,6 +10,8 @@ UUIDv4 is a 128-bit UUID generated using cryptographically secure random bits, p
 
 ## `generate()`
 
+**Usage**
+
 ```rust
 use uuid_rs;
 let my_id = uuid_rs::v4::generate();
@@ -21,18 +23,9 @@ UUIDv7 is a 128-bit, time-ordered UUID that embeds a Unix timestamp (millisecond
 
 [RFC 9562](https://www.rfc-editor.org/info/rfc9562/) does not require the random bits to be cryptographically secure, so we use a pseudorandom number generator for randomness. **If you want to use cryptographically secure bits for randomness, enable the [`v7-crypto-rand`](#v7-crypto-rand) feature flag!**
 
-## Monotonic Precision
-
-| Feature                | `generate()`                        | `generate_strict()`              |
-| ---------------------- | ----------------------------------- | -------------------------------- |
-| Default                | Thread-local timestamp monotonicity | Thread-local strict monotonicity |
-| v7-global-monotonicity | Thread-local timestamp monotonicity | Global strict monotonicity       |
-
 ## `generate()`
 
-Generates UUIDv7 values with sub-millisecond timestamp precision, but **does not guarantee monotonicity within the same sub-millisecond timestamp bucket**.
-
-Although thread-safe, UUIDs generated across multiple threads are not guaranteed to be globally monotonic.
+Generates UUIDv7 values with sub-millisecond [timestamp](#monotonic-precision) precision. Although thread-safe, UUIDs generated across multiple threads are not guaranteed to be globally monotonic.
 
 For example, two UUIDs generated within the same sub-millisecond bucket may be out of order:
 
@@ -46,7 +39,7 @@ let second = "01a1d02e-eedb-7995-808d-0ba60b4a6dd4";
 
 If you require strict sub-millisecond monotonicity, use [`generate_strict()`](#generatestrict).
 
-### Usage
+**Usage**
 
 ```rust
 use uuid_rs;
@@ -56,11 +49,9 @@ let uuidv7 = uuid_rs::v7::generate().expect("error generating");
 
 ## `generate_strict()`
 
-Guarantees **strict thread-local monotonicity**, including when multiple UUIDs are generated within the same sub-millisecond timestamp bucket.
+Guarantees **[strict](#monotonic-precision) thread-local monotonicity**. By default, monotonicity is maintained independently per thread. To guarantee **strict global monotonicity across threads**, enable the [`v7-global-monotonicity`](#v7-global-monotonicity) feature flag.
 
-By default, monotonicity is maintained independently per thread. To guarantee **strict global monotonicity across threads**, enable the [`v7-global-monotonicity`](#v7-global-monotonicity) feature flag.
-
-### Usage
+**Usage**
 
 ```rust
 use uuid_rs;
@@ -86,6 +77,16 @@ use uuid_rs;
 let uuid = uuid_rs::v7::generate_raw().unwrap();
 let formatted = uuid_rs::add_hyphens(uuid);
 ```
+
+## Monotonic Precision
+
+| Feature                | `generate()`                         | `generate_strict()`               |
+| ---------------------- | ------------------------------------ | --------------------------------- |
+| Default                | Thread-local timestamp* monotonicity | Thread-local strict* monotonicity |
+| v7-global-monotonicity | Thread-local timestamp* monotonicity | Global strict* monotonicity       |
+
+\*_timestamp_ - guarantees sub-millisecond timestamp precision, but **does not guarantee monotonicity within the same sub-millisecond timestamp bucket**
+<br>\*_strict_ - guarantees monotonicity within same sub-millisecond timestamp bucket
 
 # Cargo Features
 
