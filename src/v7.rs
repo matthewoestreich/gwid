@@ -118,7 +118,7 @@ pub fn generate_strict_raw() -> Result<u128, UUIDv7Error> {
     generate_strict_raw_with(timestamp, random_b)
 }
 
-// Returns tuple of parts where each element is: (unix_ts_ms, random_a, random_b)
+/// Returns tuple of parts where each element is: (unix_ts_ms, random_a, random_b)
 pub fn uuid_to_parts(uuid: &str) -> Result<(u128, u16, u64), std::num::ParseIntError> {
     let value = crate::uuid_to_raw(uuid)?;
     let unix_ts_ms = (value >> TIMESTAMP_SHIFT) & TIMESTAMP_MAX as u128;
