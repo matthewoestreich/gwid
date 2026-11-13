@@ -1,7 +1,17 @@
 [package]
-name = "uuid-rs"
-version = "0.1.0"
+name = "gwid"
+version = "0.0.1"
 edition = "2024"
+description = "RFC 9562-compliant UUIDs"
+authors = ["Matthew Oestreich"]
+license = "AGPL-3.0-or-later"
+repository = "https://github.com/matthewoestreich/gwid"
+homepage = "https://github.com/matthewoestreich/gwid#README.md"
+documentation = "https://docs.rs/gwid"
+readme = "README.md"
+keywords = ["uuid", "uuidv7", "uuidv4", "guid", "identifier"]
+# See available categories here: https://crates.io/category_slugs
+categories = ["algorithms", "cryptography"]
 
 [dependencies]
 rand = "0.10.3"

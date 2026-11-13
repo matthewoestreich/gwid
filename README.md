@@ -1,8 +1,6 @@
-# uuid-rs
+# gwid
 
-Just messing around trying to implement UUIDs in Rust.
-
-[UUID RFC/spec](https://www.rfc-editor.org/info/rfc9562/)
+Implementing [RFC 9562](https://www.rfc-editor.org/info/rfc9562/) ccompliant UUIDs (also known as GUIDs). The name gwid is derived from the phonetic pronunciation of GUID.
 
 # UUID Version 4
 
@@ -13,8 +11,8 @@ UUIDv4 is a 128-bit UUID generated using cryptographically secure random bits, p
 **Usage**
 
 ```rust
-use uuid_rs;
-let my_id = uuid_rs::v4::generate();
+use gwid;
+let my_id = gwid::v4::generate();
 ```
 
 ## `generate_raw() -> u128`
@@ -24,9 +22,9 @@ Returns the raw `u128` UUID. If you need to format it as a hexadecimal encoded `
 **Usage**
 
 ```rust
-use uuid_rs;
-let uuid = uuid_rs::v4::generate_raw();
-let with_hyphens = uuid_rs::add_hyphens(uuid);
+use gwid;
+let uuid = gwid::v4::generate_raw();
+let with_hyphens = gwid::add_hyphens(uuid);
 ```
 
 # UUID Version 7
@@ -54,8 +52,8 @@ If you require strict sub-millisecond monotonicity, use [`generate_strict()`](#g
 **Usage**
 
 ```rust
-use uuid_rs;
-let uuidv7 = uuid_rs::v7::generate().expect("error generating");
+use gwid;
+let uuidv7 = gwid::v7::generate().expect("error generating");
 ```
 
 ## `generate_strict() -> String`
@@ -67,8 +65,8 @@ Guarantees **[strict](#monotonic-precision) thread-local monotonicity**. By defa
 **Usage**
 
 ```rust
-use uuid_rs;
-let uuidv7 = uuid_rs::v7::generate_strict().expect("error generating strict");
+use gwid;
+let uuidv7 = gwid::v7::generate_strict().expect("error generating strict");
 ```
 
 ## `generate_raw() -> u128`
@@ -96,9 +94,9 @@ Behaves exactly like [`generate_strict()`](#generate_strict---string), but retur
 Format a raw `u128` UUID to a hexadecimal encoded `String` with hyphens.
 
 ```rust
-use uuid_rs;
+use gwid;
 let raw_uuid: u128 = 54839052801522565720884485497537422415;
-let with_hyphens = uuid_rs::add_hyphens(raw_uuid);
+let with_hyphens = gwid::add_hyphens(raw_uuid);
 ```
 
 ## `uuid_to_raw(uuid: &str) -> Result<u128, ParseIntError>`
@@ -106,9 +104,9 @@ let with_hyphens = uuid_rs::add_hyphens(raw_uuid);
 Get the underlying raw `u128` value from a UUID.
 
 ```rust
-use uuid_rs;
+use gwid;
 let uuid_str: &str = "a60d0392-a436-4e0f-b560-9f763b1d99a1";
-let raw_uuid = uuid_rs::uuid_to_raw(uuid_str).expect("raw uuid");
+let raw_uuid = gwid::uuid_to_raw(uuid_str).expect("raw uuid");
 ```
 
 ## `uuid_to_raw_unchecked(uuid: &str) -> u128`
@@ -118,9 +116,9 @@ let raw_uuid = uuid_rs::uuid_to_raw(uuid_str).expect("raw uuid");
 Get the underlying raw `u128` value from a UUID.
 
 ```rust
-use uuid_rs;
+use gwid;
 let uuid_str: &str = "a60d0392-a436-4e0f-b560-9f763b1d99a1";
-let raw_uuid = uuid_rs::uuid_to_raw_unchecked(uuid_str);
+let raw_uuid = gwid::uuid_to_raw_unchecked(uuid_str);
 ```
 
 # Cargo Features
@@ -136,7 +134,7 @@ Enable the feature in your `Cargo.toml`:
 
 ```toml
 [dependencies]
-uuid-rs = { version = "0.1", features = ["v7-global-monotonicity"] }
+gwid = { version = "0.1", features = ["v7-global-monotonicity"] }
 ```
 
 When enabled (default), UUIDv7 generation uses a shared `Mutex` to synchronize generator state across threads, ensuring globally monotonic UUID generation within the process.
@@ -149,7 +147,7 @@ Enable the feature in your `Cargo.toml`:
 
 ```toml
 [dependencies]
-uuid-rs = { version = "0.1", features = ["v7-crypto-rand"] }
+gwid = { version = "0.1", features = ["v7-crypto-rand"] }
 ```
 
 When enabled cryptographically secure bits are used for randomness (specifically, the `random_b` field).

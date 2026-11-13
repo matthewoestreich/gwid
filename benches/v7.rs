@@ -131,7 +131,7 @@ fn run_concurrent_generation(total_ids: u64, num_threads: usize) -> Duration {
             barrier.wait();
 
             for _ in 0..count {
-                let id = uuid_rs::v7::generate_raw().unwrap();
+                let id = gwid::v7::generate_raw().unwrap();
                 black_box(id);
             }
         }));
