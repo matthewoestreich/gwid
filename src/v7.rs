@@ -120,7 +120,7 @@ pub fn generate_strict_raw() -> Result<u128, UUIDv7Error> {
 
 // Returns tuple of parts where each element is: (unix_ts_ms, random_a, random_b)
 pub fn uuid_to_parts(uuid: &str) -> Result<(u128, u16, u64), std::num::ParseIntError> {
-    let value = crate::uuid_to_u128(uuid)?;
+    let value = crate::uuid_to_raw(uuid)?;
     let unix_ts_ms = (value >> TIMESTAMP_SHIFT) & TIMESTAMP_MAX as u128;
     let random_a = (value >> RANDOM_A_SHIFT) & RANDOM_A_MAX as u128;
     let random_b = value & RANDOM_B_MAX as u128;
@@ -379,7 +379,7 @@ mod test {
             }
 
             let current_id = generate_strict().unwrap();
-            let current_id_u128 = crate::uuid_to_u128_unchecked(&current_id);
+            let current_id_u128 = crate::uuid_to_raw_unchecked(&current_id);
 
             assert!(
                 uuids.insert(current_id_u128),
@@ -456,8 +456,8 @@ mod test {
         let a = generate_strict_with(ts, rand::rng().random::<u64>()).unwrap();
         let b = generate_strict_with(ts, rand::rng().random::<u64>()).unwrap();
 
-        let a_u128 = crate::uuid_to_u128_unchecked(&a);
-        let b_u128 = crate::uuid_to_u128_unchecked(&b);
+        let a_u128 = crate::uuid_to_raw_unchecked(&a);
+        let b_u128 = crate::uuid_to_raw_unchecked(&b);
 
         assert!(
             a_u128 < b_u128,
@@ -567,7 +567,7 @@ mod test {
 
         let uuid = generate_strict_with(Duration::from_millis(timestamp as u64), 12345).unwrap();
 
-        let value = crate::uuid_to_u128_unchecked(&uuid);
+        let value = crate::uuid_to_raw_unchecked(&uuid);
         let decoded_timestamp = (value >> TIMESTAMP_SHIFT) & TIMESTAMP_MAX as u128;
 
         assert_eq!(decoded_timestamp, timestamp);
@@ -793,7 +793,7 @@ mod strict_global_monotonicity {
 
                     for _ in 0..UUIDS_PER_THREAD {
                         generate_strict_and(|uuid| {
-                            let uuid_value = crate::uuid_to_u128_unchecked(uuid);
+                            let uuid_value = crate::uuid_to_raw_unchecked(uuid);
                             let i = index.fetch_add(1, Ordering::Relaxed);
                             generated.push((i, uuid_value));
                         })

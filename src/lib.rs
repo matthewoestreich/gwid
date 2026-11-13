@@ -20,6 +20,17 @@ pub fn add_hyphens(n: u128) -> String {
     )
 }
 
+/// Unchecked method! Panics if something goes wrong.
+/// Converts a `uuid` string into a u128.
+pub fn uuid_to_raw_unchecked(uuid: &str) -> u128 {
+    u128::from_str_radix(&uuid.replace("-", ""), 16).unwrap()
+}
+
+/// Converts a `uuid` string into a u128.
+pub fn uuid_to_raw(uuid: &str) -> Result<u128, std::num::ParseIntError> {
+    u128::from_str_radix(&uuid.replace("-", ""), 16)
+}
+
 // Clears UUID Version bits (bits 48, 49, 50, and 51 when counting left->right and starting at 0)
 // 11111111111111111111111111111111111111111111111100001111111111111111111111111111111111111111111111111111111111111111111111111111
 pub(crate) const CLEAR_VERSION_MASK: u128 = 0xFFFFFFFFFFFF0FFFFFFFFFFFFFFFFFFF;
@@ -43,15 +54,35 @@ pub(crate) fn print_bits<T: std::fmt::Binary>(value: T) {
     println!();
 }
 
-/// Unchecked method! Panics if something goes wrong.
-/// Converts a `uuid` string into a u128.
-#[allow(dead_code)]
-pub(crate) fn uuid_to_u128_unchecked(uuid: &str) -> u128 {
-    u128::from_str_radix(&uuid.replace("-", ""), 16).unwrap()
-}
+#[cfg(test)]
+mod lib_test {
+    use super::*;
 
-/// Converts a `uuid` string into a u128.
-#[allow(dead_code)]
-pub(crate) fn uuid_to_u128(uuid: &str) -> Result<u128, std::num::ParseIntError> {
-    u128::from_str_radix(&uuid.replace("-", ""), 16)
+    #[test]
+    fn add_hyphens_to_raw_uuid() {
+        let raw: u128 = 213409605541016776915642275756511741574;
+        let expect = "a08d31e9-c256-443e-8425-73c382264686";
+        let got = add_hyphens(raw);
+        assert_eq!(
+            expect, &got,
+            "add_hyphens_to_raw_uuid | expected= {expect} got= {got}"
+        );
+    }
+
+    // Tests both unchecked and "regular" variants.
+    #[test]
+    fn convert_uuid_to_u128() {
+        let uuid = "a08d31e9-c256-443e-8425-73c382264686";
+        let expect: u128 = 213409605541016776915642275756511741574;
+        let got = uuid_to_raw_unchecked(uuid);
+        assert_eq!(
+            expect, got,
+            "convert_uuid_to_u128_unchecked | expected= {expect} got= {got}"
+        );
+        let got = uuid_to_raw(uuid).unwrap();
+        assert_eq!(
+            expect, got,
+            "convert_uuid_to_u128 | expected= {expect} got= {got}"
+        );
+    }
 }

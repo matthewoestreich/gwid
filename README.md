@@ -93,12 +93,34 @@ Behaves exactly like [`generate_strict()`](#generate_strict---string), but retur
 
 ## `add_hyphens(uuid: u128) -> String`
 
-Helper function to format a raw `u128` UUID to a hexadecimal encoded `String` with hyphens.
+Format a raw `u128` UUID to a hexadecimal encoded `String` with hyphens.
 
 ```rust
 use uuid_rs;
 let raw_uuid: u128 = 54839052801522565720884485497537422415;
 let with_hyphens = uuid_rs::add_hyphens(raw_uuid);
+```
+
+## `uuid_to_raw(uuid: &str) -> Result<u128, ParseIntError>`
+
+Get the underlying raw `u128` value from a UUID.
+
+```rust
+use uuid_rs;
+let uuid_str = "a60d0392-a436-4e0f-b560-9f763b1d99a1";
+let raw_uuid = uuid_rs::uuid_to_raw(uuid_str).expect("raw uuid");
+```
+
+## `uuid_to_raw_unchecked(uuid: &str) -> u128`
+
+**Panics** if something goes wrong during parsing!
+
+Get the underlying raw `u128` value from a UUID.
+
+```rust
+use uuid_rs;
+let uuid_str = "a60d0392-a436-4e0f-b560-9f763b1d99a1";
+let raw_uuid = uuid_rs::uuid_to_raw_unchecked(uuid_str);
 ```
 
 # Cargo Features
