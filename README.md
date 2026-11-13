@@ -68,11 +68,11 @@ let uuidv7 = uuid_rs::v7::generate_strict().expect("error generating strict");
 
 ## `generate_raw()`
 
-Behaves exactly like `generate()`, but returns the raw `u128` UUID. If you need to format the raw UUID as a `String` with hyphens, please use [`add_hyphens`](#addhyphensuuid-u128).
+Behaves exactly like `generate()`, but returns the raw `u128` UUID. If you need to format the raw UUID as a `String` with hyphens, please use [`add_hyphens`](#add_hyphensuuid-u128).
 
 ## `generate_strict_raw()`
 
-Behaves exactly like `generate_strict()`, but returns the raw `u128` UUID. If you need to format the raw UUID as a `String` with hyphens, please use [`add_hyphens`](#addhyphensuuid-u128).
+Behaves exactly like `generate_strict()`, but returns the raw `u128` UUID. If you need to format the raw UUID as a `String` with hyphens, please use [`add_hyphens`](#add_hyphensuuid-u128).
 
 ## `add_hyphens(uuid: u128)`
 
