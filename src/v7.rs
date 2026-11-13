@@ -198,8 +198,9 @@ fn ensure_monotonicity(
     // Enforce nondecreasing time
     *unix_ts_ms = u128::max(ctx.ts, *unix_ts_ms);
 
+    // We only need to enforce nondecreasing time in
+    // random_a if the timestamp has not advanced.
     if *unix_ts_ms == ctx.ts {
-        // Enforce nondecreasing sub-ms time
         *random_a = u16::max(ctx.a, *random_a);
     }
 
@@ -230,18 +231,27 @@ fn ensure_strict_monotonicity(
         // Only need to advance rand_b when rand_a has not advanced
         // and rand_b is not already greater than its previous value.
         if *random_a == ctx.a && *random_b <= ctx.b {
+            // If random_b has not overflowed, increment it.
             if ctx.b < RANDOM_B_MAX {
                 *random_b = u64::max(ctx.b + 1, *random_b);
-            } else if ctx.a < RANDOM_A_MAX {
-                // rand_b is exhausted. Advance rand_a.
+            }
+            // If random_b overlowed and random_a has not overflowed: we need to increment
+            // random_a and reset randomb_b so we can use all values within new sub-ms value.
+            else if ctx.a < RANDOM_A_MAX {
                 *random_a = ctx.a + 1;
                 *random_b = 0;
-            } else if ctx.ts < TIMESTAMP_MAX as u128 {
+            }
+            // If random_a and random_b both overflowed and timestamp has not overflowed:
+            // we need to increment the timestamp and reset random_a and random_b so we can
+            // use all available value within the new timestamp.
+            else if ctx.ts < TIMESTAMP_MAX as u128 {
                 // Both random fields are exhausted. Advance the timestamp.
                 *unix_ts_ms = ctx.ts + 1;
                 *random_a = 0;
                 *random_b = 0;
-            } else {
+            }
+            // All fields overflowed
+            else {
                 return Err(UUIDv7Error::Exhausted);
             }
         }
@@ -250,7 +260,6 @@ fn ensure_strict_monotonicity(
     ctx.ts = *unix_ts_ms;
     ctx.a = *random_a;
     ctx.b = *random_b;
-
     Ok(())
 }
 
@@ -264,10 +273,10 @@ impl Display for UUIDv7Error {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         use UUIDv7Error::*;
         match self {
-            Exhausted => write!(
-                f,
-                "Both random fields, as well as the timestamp, have been exhausted! Rethink your threading strategy!"
-            ),
+            Exhausted => {
+                let e = "The 'timestamp', 'random_a', and 'random_b' fields have all overflowed! Rethink your threading strategy!";
+                write!(f, "{e}")
+            }
             SystemTimeError(err) => write!(f, "System time error {err}"),
         }
     }
