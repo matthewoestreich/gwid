@@ -6,6 +6,10 @@ pub mod math_random {
     use crate::nums::utils::RandomNumberGenerator;
     use std::time::{SystemTime, UNIX_EPOCH};
 
+    pub trait RandomProvider {
+        fn random(&mut self) -> u64;
+    }
+
     #[derive(Default, Debug)]
     pub struct State {
         pub s0: u64,
@@ -16,7 +20,13 @@ pub mod math_random {
     pub struct MathRandom {
         state: State,
         cache_index: usize,
-        cache: [f64; Self::K_CACHE_SIZE as usize],
+        cache: [u64; Self::K_CACHE_SIZE as usize],
+    }
+
+    impl RandomProvider for MathRandom {
+        fn random(&mut self) -> u64 {
+            self.random_u64()
+        }
     }
 
     impl MathRandom {
@@ -36,7 +46,7 @@ pub mod math_random {
             let mut this = Self {
                 state: State::default(),
                 cache_index: 0,
-                cache: [0.0; Self::K_CACHE_SIZE as usize],
+                cache: [0; Self::K_CACHE_SIZE as usize],
             };
 
             this.state.s0 = RandomNumberGenerator::murmurhash3(seed);
@@ -51,22 +61,22 @@ pub mod math_random {
                 self.refill_cache();
             }
             self.cache_index -= 1;
-            self.cache[self.cache_index]
+            RandomNumberGenerator::to_double(self.cache[self.cache_index])
         }
 
-        pub fn random(&mut self) -> u64 {
+        pub fn random_u64(&mut self) -> u64 {
             if self.cache_index == 0 {
                 self.refill_cache();
             }
             self.cache_index -= 1;
-            Self::reverse_to_double(self.cache[self.cache_index])
+            self.cache[self.cache_index]
         }
 
         fn refill_cache(&mut self) {
             for i in (0usize..=(Self::K_CACHE_SIZE - 1) as usize).rev() {
                 let random =
                     RandomNumberGenerator::xorshift128(&mut self.state.s0, &mut self.state.s1);
-                self.cache[i] = RandomNumberGenerator::to_double(random);
+                self.cache[i] = random;
             }
             self.cache_index = Self::K_CACHE_SIZE as usize;
         }

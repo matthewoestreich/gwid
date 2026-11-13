@@ -34,6 +34,8 @@ use crate::VARIANT_SHIFT;
 use crate::VERSION_SHIFT;
 #[cfg(not(feature = "v7-crypto-rand"))]
 use crate::nums::math_random::MathRandom;
+#[cfg(not(feature = "v7-crypto-rand"))]
+use crate::nums::math_random::RandomProvider as _;
 use rand::RngExt;
 #[cfg(feature = "v7-crypto-rand")]
 use rand::rngs::ThreadRng;
@@ -60,7 +62,7 @@ thread_local! {
 }
 
 thread_local! {
-    static RNG: RefCell<Randomness> = RefCell::new(Randomness::new())
+    static RNG: RefCell<EntropySource> = RefCell::new(EntropySource::new())
 }
 
 // Used by `generate_strict()` to maintain strict global monotonicity.
@@ -105,13 +107,13 @@ struct UUIDv7Context {
 
 pub fn generate() -> Result<String, UUIDv7Error> {
     let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?;
-    let random_b = RNG.with_borrow_mut(|r| r.random());
+    let random_b = RNG.with_borrow_mut(|entropy_source| entropy_source.random());
     Ok(generate_with(timestamp, random_b))
 }
 
 pub fn generate_strict() -> Result<String, UUIDv7Error> {
     let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?;
-    let random_b = RNG.with_borrow_mut(|r| r.random());
+    let random_b = RNG.with_borrow_mut(|entropy_source| entropy_source.random());
     generate_strict_with(timestamp, random_b)
 }
 
@@ -136,8 +138,6 @@ fn generate_strict_with(timestamp: Duration, random_b: u64) -> Result<String, UU
     let mut unix_ts_ms = timestamp.as_millis() & TIMESTAMP_MAX as u128;
     let mut random_a = derive_random_a(timestamp) & RANDOM_A_MAX;
     let mut random_b = random_b & RANDOM_B_MAX;
-
-    print!("random_b | before_ensure = ");
 
     #[cfg(feature = "v7-global-monotonicity")]
     let mut ctx = STRICT_CONTEXT
@@ -285,14 +285,14 @@ impl error::Error for UUIDv7Error {
     }
 }
 
-pub struct Randomness {
+pub struct EntropySource {
     #[cfg(not(feature = "v7-crypto-rand"))]
     rng: MathRandom,
     #[cfg(feature = "v7-crypto-rand")]
     rng: ThreadRng,
 }
 
-impl Randomness {
+impl EntropySource {
     #[rustfmt::skip]
     pub(crate) fn new() -> Self {
         #[cfg(not(feature = "v7-crypto-rand"))]
