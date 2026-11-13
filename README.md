@@ -21,8 +21,6 @@ let my_id = uuid_rs::v4::generate();
 
 UUIDv7 is a 128-bit, time-ordered UUID that embeds a Unix timestamp (milliseconds) and uses random bits for uniqueness. Its time-based structure makes UUIDs naturally sortable by creation time.
 
-[RFC 9562](https://www.rfc-editor.org/info/rfc9562/) does not require the random bits to be cryptographically secure, so we use a pseudorandom number generator for randomness. **If you want to use cryptographically secure bits for randomness, enable the [`v7-crypto-rand`](#v7-crypto-rand) feature flag!**
-
 ## `generate()`
 
 Generates UUIDv7 values with sub-millisecond [timestamp](#monotonic-precision) precision. Although thread-safe, UUIDs generated across multiple threads are not guaranteed to be globally monotonic.
@@ -37,6 +35,8 @@ let first = "01a1d02e-eedb-7995-82da-278257b8340d";
 let second = "01a1d02e-eedb-7995-808d-0ba60b4a6dd4";
 ```
 
+[RFC 9562](https://www.rfc-editor.org/info/rfc9562/) does not require the random bits to be cryptographically secure, so we use a pseudorandom number generator for randomness. **If you want to use cryptographically secure bits for randomness, enable the [`v7-crypto-rand`](#v7-crypto-rand) feature flag!**
+
 If you require strict sub-millisecond monotonicity, use [`generate_strict()`](#generatestrict).
 
 **Usage**
@@ -50,6 +50,8 @@ let uuidv7 = uuid_rs::v7::generate().expect("error generating");
 ## `generate_strict()`
 
 Guarantees **[strict](#monotonic-precision) thread-local monotonicity**. By default, monotonicity is maintained independently per thread. To guarantee **strict global monotonicity across threads**, enable the [`v7-global-monotonicity`](#v7-global-monotonicity) feature flag.
+
+[RFC 9562](https://www.rfc-editor.org/info/rfc9562/) does not require the random bits to be cryptographically secure, so we use a pseudorandom number generator for randomness. **If you want to use cryptographically secure bits for randomness, enable the [`v7-crypto-rand`](#v7-crypto-rand) feature flag!**
 
 **Usage**
 
