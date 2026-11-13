@@ -6,10 +6,6 @@ pub mod math_random {
     use crate::nums::utils::RandomNumberGenerator;
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    pub trait RandomProvider {
-        fn random(&mut self) -> u64;
-    }
-
     #[derive(Default, Debug)]
     pub struct State {
         pub s0: u64,
@@ -21,12 +17,6 @@ pub mod math_random {
         state: State,
         cache_index: usize,
         cache: [u64; Self::K_CACHE_SIZE as usize],
-    }
-
-    impl RandomProvider for MathRandom {
-        fn random(&mut self) -> u64 {
-            self.random_u64()
-        }
     }
 
     impl MathRandom {
@@ -43,18 +33,15 @@ pub mod math_random {
                     .as_secs(),
             };
 
-            let state = State {
-                s0: RandomNumberGenerator::murmurhash3(seed),
-                s1: RandomNumberGenerator::murmurhash3(!seed),
-            };
-
             let mut this = Self {
-                state: State::default(),
+                state: State {
+                    s0: RandomNumberGenerator::murmurhash3(seed),
+                    s1: RandomNumberGenerator::murmurhash3(!seed),
+                },
                 cache_index: 0,
                 cache: [0; Self::K_CACHE_SIZE as usize],
             };
 
-            this.state = state;
             this.refill_cache();
             this
         }

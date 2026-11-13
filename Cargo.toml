@@ -10,3 +10,8 @@ rand = "0.10.3"
 v7-crypto-rand = []
 v7-global-monotonicity = []
 default = []
+
+[[bench]]
+name = "v7"
+harness = false
+# required-features = ['v7-crypto-rand']

@@ -11,8 +11,8 @@ UUIDv4 is a 128-bit UUID generated using cryptographically secure random bits, p
 ## `generate()`
 
 ```rust
-use rs_uuid;
-let my_id = rs_uuid::v4::generate();
+use uuid_rs;
+let my_id = uuid_rs::v4::generate();
 ```
 
 # UUID Version 7
@@ -47,22 +47,43 @@ If you require strict sub-millisecond monotonicity, use [`generate_strict()`](#g
 ### Usage
 
 ```rust
-use rs_uuid;
+use uuid_rs;
 
-let uuidv7 = rs_uuid::v7::generate().expect("error generating");
+let uuidv7 = uuid_rs::v7::generate().expect("error generating");
 ```
 
 ## `generate_strict()`
 
-```rust
-use rs_uuid;
-
-let uuidv7 = rs_uuid::v7::generate_strict().expect("error generating strict");
-```
-
 Guarantees **strict thread-local monotonicity**, including when multiple UUIDs are generated within the same sub-millisecond timestamp bucket.
 
 By default, monotonicity is maintained independently per thread. To guarantee **strict global monotonicity across threads**, enable the [`v7-global-monotonicity`](#v7-global-monotonicity) feature flag.
+
+### Usage
+
+```rust
+use uuid_rs;
+
+let uuidv7 = uuid_rs::v7::generate_strict().expect("error generating strict");
+```
+
+## `generate_raw()`
+
+Behaves exactly like `generate()`, but returns the raw `u128` UUID. If you need to format the raw UUID as a `String` with hyphens, please use [`add_hyphens`](#addhyphensuuid-u128).
+
+## `generate_strict_raw()`
+
+Behaves exactly like `generate_strict()`, but returns the raw `u128` UUID. If you need to format the raw UUID as a `String` with hyphens, please use [`add_hyphens`](#addhyphensuuid-u128).
+
+## `add_hyphens(uuid: u128)`
+
+Helper function to format a raw `u128` UUID to `String` with hyphens.
+
+```rust
+use uuid_rs;
+
+let uuid = uuid_rs::v7::generate_raw().unwrap();
+let formatted = uuid_rs::add_hyphens(uuid);
+```
 
 # Cargo Features
 

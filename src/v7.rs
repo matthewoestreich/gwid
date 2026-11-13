@@ -35,8 +35,6 @@ use crate::VARIANT_SHIFT;
 use crate::VERSION_SHIFT;
 #[cfg(not(feature = "v7-crypto-rand"))]
 use crate::nums::math_random::MathRandom;
-#[cfg(not(feature = "v7-crypto-rand"))]
-use crate::nums::math_random::RandomProvider as _;
 use rand::RngExt;
 #[cfg(feature = "v7-crypto-rand")]
 use rand::rngs::ThreadRng;
@@ -95,17 +93,6 @@ const RANDOM_A_SHIFT: u128 = 64;
 const VERSION: u8 = 7; // 0b111
 const VARIANT: u8 = 2; // 0b10
 
-/// To hold global state for monotonic id generation
-#[derive(Debug)]
-struct UUIDv7Context {
-    /// previous timestamp (uses ms)
-    pub(crate) ts: u128,
-    /// previous random_a
-    pub(crate) a: u16,
-    /// previous random_b
-    pub(crate) b: u64,
-}
-
 pub fn generate() -> Result<String, UUIDv7Error> {
     let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?;
     let random_b = RNG.with_borrow_mut(|entropy_source| entropy_source.random());
@@ -118,7 +105,29 @@ pub fn generate_strict() -> Result<String, UUIDv7Error> {
     generate_strict_with(timestamp, random_b)
 }
 
-fn generate_with(timestamp: Duration, random_b: u64) -> String {
+pub fn generate_raw() -> Result<u128, UUIDv7Error> {
+    let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?;
+    let random_b = RNG.with_borrow_mut(|entropy_source| entropy_source.random());
+    Ok(generate_raw_with(timestamp, random_b))
+}
+
+pub fn generate_strict_raw() -> Result<u128, UUIDv7Error> {
+    let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?;
+    let random_b = RNG.with_borrow_mut(|entropy_source| entropy_source.random());
+    generate_strict_raw_with(timestamp, random_b)
+}
+
+// Returns tuple of parts where each element is: (unix_ts_ms, random_a, random_b)
+pub fn uuid_to_parts(uuid: &str) -> Result<(u128, u16, u64), std::num::ParseIntError> {
+    let value = crate::uuid_to_u128(uuid)?;
+    let unix_ts_ms = (value >> TIMESTAMP_SHIFT) & TIMESTAMP_MAX as u128;
+    let random_a = (value >> RANDOM_A_SHIFT) & RANDOM_A_MAX as u128;
+    let random_b = value & RANDOM_B_MAX as u128;
+
+    Ok((unix_ts_ms, random_a as u16, random_b as u64))
+}
+
+fn generate_raw_with(timestamp: Duration, random_b: u64) -> u128 {
     let mut unix_ts_ms = timestamp.as_millis() & TIMESTAMP_MAX as u128;
     let mut random_a = derive_random_a(timestamp) & RANDOM_A_MAX;
     let random_b = random_b & RANDOM_B_MAX;
@@ -126,16 +135,18 @@ fn generate_with(timestamp: Duration, random_b: u64) -> String {
     CONTEXT
         .with_borrow_mut(|ctx| ensure_monotonicity(&mut unix_ts_ms, &mut random_a, random_b, ctx));
 
-    let uuid = (unix_ts_ms << TIMESTAMP_SHIFT) & CLEAR_VERSION_MASK
+    (unix_ts_ms << TIMESTAMP_SHIFT) & CLEAR_VERSION_MASK
         | ((VERSION as u128) << VERSION_SHIFT)
         | ((random_a as u128) << RANDOM_A_SHIFT) & CLEAR_VARIANT_MASK
         | ((VARIANT as u128) << VARIANT_SHIFT)
-        | (random_b as u128);
-
-    crate::add_hyphens(uuid)
+        | (random_b as u128)
 }
 
-fn generate_strict_with(timestamp: Duration, random_b: u64) -> Result<String, UUIDv7Error> {
+fn generate_with(timestamp: Duration, random_b: u64) -> String {
+    crate::add_hyphens(generate_raw_with(timestamp, random_b))
+}
+
+fn generate_strict_raw_with(timestamp: Duration, random_b: u64) -> Result<u128, UUIDv7Error> {
     let mut unix_ts_ms = timestamp.as_millis() & TIMESTAMP_MAX as u128;
     let mut random_a = derive_random_a(timestamp) & RANDOM_A_MAX;
     let mut random_b = random_b & RANDOM_B_MAX;
@@ -153,14 +164,17 @@ fn generate_strict_with(timestamp: Duration, random_b: u64) -> Result<String, UU
         ensure_strict_monotonicity(&mut unix_ts_ms, &mut random_a, &mut random_b, ctx)
     })?;
 
-    let uuid = (unix_ts_ms << TIMESTAMP_SHIFT) & CLEAR_VERSION_MASK
+    Ok((unix_ts_ms << TIMESTAMP_SHIFT) & CLEAR_VERSION_MASK
         | ((VERSION as u128) << VERSION_SHIFT)
         | ((random_a as u128) << RANDOM_A_SHIFT) & CLEAR_VARIANT_MASK
         | ((VARIANT as u128) << VARIANT_SHIFT)
-        | (random_b as u128);
+        | (random_b as u128))
+}
 
-    let uuid = crate::add_hyphens(uuid);
-    Ok(uuid)
+fn generate_strict_with(timestamp: Duration, random_b: u64) -> Result<String, UUIDv7Error> {
+    Ok(crate::add_hyphens(generate_strict_raw_with(
+        timestamp, random_b,
+    )?))
 }
 
 /// Generate `random_a` bits using additional clock  precision as to satisfy monotonic
@@ -168,23 +182,6 @@ fn generate_strict_with(timestamp: Duration, random_b: u64) -> Result<String, UU
 fn derive_random_a(from_timestamp: Duration) -> u16 {
     let sub_ms_nanos = from_timestamp.subsec_nanos() % 1_000_000;
     ((RANDOM_A_TOTAL_VALUES as u64 * sub_ms_nanos as u64) / 1_000_000) as u16
-}
-
-#[derive(Debug)]
-pub struct UUIDv7Parts {
-    pub unix_ts_ms: u128,
-    pub random_a: u16,
-    pub random_b: u64,
-}
-
-// Returns tuple of parts where each element is: (unix_ts_ms, random_a, random_b)
-pub fn uuid_to_parts(uuid: &str) -> Result<(u128, u16, u64), std::num::ParseIntError> {
-    let value = crate::uuid_to_u128(uuid)?;
-    let unix_ts_ms = (value >> TIMESTAMP_SHIFT) & TIMESTAMP_MAX as u128;
-    let random_a = (value >> RANDOM_A_SHIFT) & RANDOM_A_MAX as u128;
-    let random_b = value & RANDOM_B_MAX as u128;
-
-    Ok((unix_ts_ms, random_a as u16, random_b as u64))
 }
 
 /// - Only handles clock drift
@@ -196,6 +193,7 @@ fn ensure_monotonicity(
 ) {
     // Enforce nondecreasing time
     *unix_ts_ms = u128::max(ctx.ts, *unix_ts_ms);
+
     if *unix_ts_ms == ctx.ts {
         // Enforce nondecreasing sub-ms time
         *random_a = u16::max(ctx.a, *random_a);
@@ -286,7 +284,30 @@ impl error::Error for UUIDv7Error {
     }
 }
 
-pub(crate) struct EntropySource {
+/// To hold global state for monotonic id generation
+#[derive(Debug)]
+struct UUIDv7Context {
+    /// previous timestamp (uses ms)
+    pub(crate) ts: u128,
+    /// previous random_a
+    pub(crate) a: u16,
+    /// previous random_b
+    pub(crate) b: u64,
+}
+
+#[cfg(not(feature = "v7-crypto-rand"))]
+trait RandomProvider {
+    fn random(&mut self) -> u64;
+}
+
+#[cfg(not(feature = "v7-crypto-rand"))]
+impl RandomProvider for MathRandom {
+    fn random(&mut self) -> u64 {
+        self.random_u64()
+    }
+}
+
+struct EntropySource {
     #[cfg(not(feature = "v7-crypto-rand"))]
     rng: MathRandom,
     #[cfg(feature = "v7-crypto-rand")]

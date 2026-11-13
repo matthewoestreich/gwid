@@ -3,6 +3,25 @@ pub mod v7;
 
 pub(crate) mod nums;
 
+/// Formats `n` as hex and inserts hyphens at appropriate indicies.
+pub fn add_hyphens(n: u128) -> String {
+    // const FIRST_HYPHEN_INDEX: usize = 8;
+    // const SECOND_HYPHEN_INDEX: usize = 12;
+    // const THIRD_HYPHEN_INDEX: usize = 16;
+    // const FOURTH_HYPHEN_INDEX: usize = 20;
+
+    let uuid = format!("{n:032x}");
+
+    format!(
+        "{}-{}-{}-{}-{}",
+        &uuid[..8],
+        &uuid[8..12],
+        &uuid[12..16],
+        &uuid[16..20],
+        &uuid[20..]
+    )
+}
+
 // Clears UUID Version bits (bits 48, 49, 50, and 51 when counting left->right and starting at 0)
 // 11111111111111111111111111111111111111111111111100001111111111111111111111111111111111111111111111111111111111111111111111111111
 pub(crate) const CLEAR_VERSION_MASK: u128 = 0xFFFFFFFFFFFF0FFFFFFFFFFFFFFFFFFF;
@@ -11,25 +30,6 @@ pub(crate) const CLEAR_VERSION_MASK: u128 = 0xFFFFFFFFFFFF0FFFFFFFFFFFFFFFFFFF;
 pub(crate) const CLEAR_VARIANT_MASK: u128 = 0xFFFFFFFFFFFFFFFF3FFFFFFFFFFFFFFF;
 pub(crate) const VERSION_SHIFT: u128 = 76;
 pub(crate) const VARIANT_SHIFT: u128 = 62;
-
-/// Formats `n` as hex and inserts hyphens at appropriate indicies.
-pub(crate) fn add_hyphens(n: u128) -> String {
-    const FIRST_HYPHEN_INDEX: usize = 8;
-    const SECOND_HYPHEN_INDEX: usize = 12;
-    const THIRD_HYPHEN_INDEX: usize = 16;
-    const FOURTH_HYPHEN_INDEX: usize = 20;
-
-    let uuid = format!("{n:032x}");
-
-    format!(
-        "{}-{}-{}-{}-{}",
-        &uuid[..FIRST_HYPHEN_INDEX],
-        &uuid[FIRST_HYPHEN_INDEX..SECOND_HYPHEN_INDEX],
-        &uuid[SECOND_HYPHEN_INDEX..THIRD_HYPHEN_INDEX],
-        &uuid[THIRD_HYPHEN_INDEX..FOURTH_HYPHEN_INDEX],
-        &uuid[FOURTH_HYPHEN_INDEX..]
-    )
-}
 
 // Helper function to print bits
 #[allow(dead_code)]
