@@ -107,7 +107,7 @@ Get the underlying raw `u128` value from a UUID.
 
 ```rust
 use uuid_rs;
-let uuid_str = "a60d0392-a436-4e0f-b560-9f763b1d99a1";
+let uuid_str: &str = "a60d0392-a436-4e0f-b560-9f763b1d99a1";
 let raw_uuid = uuid_rs::uuid_to_raw(uuid_str).expect("raw uuid");
 ```
 
@@ -119,7 +119,7 @@ Get the underlying raw `u128` value from a UUID.
 
 ```rust
 use uuid_rs;
-let uuid_str = "a60d0392-a436-4e0f-b560-9f763b1d99a1";
+let uuid_str: &str = "a60d0392-a436-4e0f-b560-9f763b1d99a1";
 let raw_uuid = uuid_rs::uuid_to_raw_unchecked(uuid_str);
 ```
 

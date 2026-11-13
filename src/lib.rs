@@ -61,7 +61,7 @@ mod lib_test {
     #[test]
     fn add_hyphens_to_raw_uuid() {
         let raw: u128 = 213409605541016776915642275756511741574;
-        let expect = "a08d31e9-c256-443e-8425-73c382264686";
+        let expect: &str = "a08d31e9-c256-443e-8425-73c382264686";
         let got = add_hyphens(raw);
         assert_eq!(
             expect, &got,
