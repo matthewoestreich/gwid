@@ -28,6 +28,7 @@
 //     The 2-bit variant field as defined by Section 4.1, set to 0b10. Occupies bits 64 and 65 of octet 8.
 // rand_b:
 //     The final 62 bits of pseudorandom data to provide uniqueness as per Section 6.9 and/or an optional counter to guarantee additional monotonicity as per Section 6.2. Occupies bits 66 through 127 (octets 8-15).
+
 use crate::CLEAR_VARIANT_MASK;
 use crate::CLEAR_VERSION_MASK;
 use crate::VARIANT_SHIFT;
