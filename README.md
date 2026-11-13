@@ -98,7 +98,7 @@ Helper function to format a raw `u128` UUID to a hexadecimal encoded `String` wi
 ```rust
 use uuid_rs;
 let raw_uuid: u128 = 54839052801522565720884485497537422415;
-let with_hyphens = uuid_rs::add_hyphens(uuid);
+let with_hyphens = uuid_rs::add_hyphens(raw_uuid);
 ```
 
 # Cargo Features
