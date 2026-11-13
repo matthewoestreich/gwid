@@ -286,7 +286,7 @@ impl error::Error for UUIDv7Error {
     }
 }
 
-pub struct EntropySource {
+pub(crate) struct EntropySource {
     #[cfg(not(feature = "v7-crypto-rand"))]
     rng: MathRandom,
     #[cfg(feature = "v7-crypto-rand")]
@@ -295,7 +295,7 @@ pub struct EntropySource {
 
 impl EntropySource {
     #[rustfmt::skip]
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         #[cfg(not(feature = "v7-crypto-rand"))]
         { Self { rng: MathRandom::initialize(Some(rand::rng().random())) } }
         #[cfg(feature = "v7-crypto-rand")]
