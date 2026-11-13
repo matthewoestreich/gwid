@@ -135,11 +135,7 @@ fn generate_raw_with(timestamp: Duration, random_b: u64) -> u128 {
     CONTEXT
         .with_borrow_mut(|ctx| ensure_monotonicity(&mut unix_ts_ms, &mut random_a, random_b, ctx));
 
-    (unix_ts_ms << TIMESTAMP_SHIFT) & CLEAR_VERSION_MASK
-        | ((VERSION as u128) << VERSION_SHIFT)
-        | ((random_a as u128) << RANDOM_A_SHIFT) & CLEAR_VARIANT_MASK
-        | ((VARIANT as u128) << VARIANT_SHIFT)
-        | (random_b as u128)
+    raw_uuid_from_parts(unix_ts_ms, random_a, random_b)
 }
 
 fn generate_with(timestamp: Duration, random_b: u64) -> String {
@@ -164,11 +160,7 @@ fn generate_strict_raw_with(timestamp: Duration, random_b: u64) -> Result<u128, 
         ensure_strict_monotonicity(&mut unix_ts_ms, &mut random_a, &mut random_b, ctx)
     })?;
 
-    Ok((unix_ts_ms << TIMESTAMP_SHIFT) & CLEAR_VERSION_MASK
-        | ((VERSION as u128) << VERSION_SHIFT)
-        | ((random_a as u128) << RANDOM_A_SHIFT) & CLEAR_VARIANT_MASK
-        | ((VARIANT as u128) << VARIANT_SHIFT)
-        | (random_b as u128))
+    Ok(raw_uuid_from_parts(unix_ts_ms, random_a, random_b))
 }
 
 fn generate_strict_with(timestamp: Duration, random_b: u64) -> Result<String, UUIDv7Error> {
@@ -182,6 +174,18 @@ fn generate_strict_with(timestamp: Duration, random_b: u64) -> Result<String, UU
 fn derive_random_a(from_timestamp: Duration) -> u16 {
     let sub_ms_nanos = from_timestamp.subsec_nanos() % 1_000_000;
     ((RANDOM_A_TOTAL_VALUES as u64 * sub_ms_nanos as u64) / 1_000_000) as u16
+}
+
+/// ----------------------------------------------------------------------------
+/// **IMPORTANT** this method assumes all parts have been properly masked!!!!
+/// We do not apply masks to any part.
+/// ----------------------------------------------------------------------------
+fn raw_uuid_from_parts(unix_ts_ms: u128, random_a: u16, random_b: u64) -> u128 {
+    (unix_ts_ms << TIMESTAMP_SHIFT) & CLEAR_VERSION_MASK
+        | ((VERSION as u128) << VERSION_SHIFT)
+        | ((random_a as u128) << RANDOM_A_SHIFT) & CLEAR_VARIANT_MASK
+        | ((VARIANT as u128) << VARIANT_SHIFT)
+        | (random_b as u128)
 }
 
 /// - Only handles clock drift
