@@ -19,7 +19,7 @@ let my_id = uuid_rs::v4::generate();
 
 ## `generate_raw() -> u128`
 
-Returns the raw `u128` UUID. If you need to format it as `String` with hyphens, please use [`add_hyphens`](#add_hyphensuuid-u128).
+Returns the raw `u128` UUID. If you need to format it as `String` with hyphens, please use [`add_hyphens`](#add_hyphensuuid-u128---string).
 
 **Usage**
 
@@ -47,7 +47,7 @@ let first = "01a1d02e-eedb-7995-82da-278257b8340d";
 let second = "01a1d02e-eedb-7995-808d-0ba60b4a6dd4";
 ```
 
-If you require strict sub-millisecond monotonicity, use [`generate_strict()`](#generatestrict).
+If you require strict sub-millisecond monotonicity, use [`generate_strict()`](#generate_strict---string).
 
 [RFC 9562](https://www.rfc-editor.org/info/rfc9562/) does not require the random bits to be cryptographically secure, so we use a pseudorandom number generator for randomness. **If you want to use cryptographically secure bits for randomness, enable the [`v7-crypto-rand`](#v7-crypto-rand) feature flag!**
 
@@ -73,11 +73,11 @@ let uuidv7 = uuid_rs::v7::generate_strict().expect("error generating strict");
 
 ## `generate_raw() -> u128`
 
-Behaves exactly like `generate()`, but returns the raw `u128` UUID. If you need to format the raw UUID as a `String` with hyphens, please use [`add_hyphens`](#add_hyphensuuid-u128).
+Behaves exactly like [`generate()`](#generate---string-1), but returns the raw `u128` UUID. If you need to format the raw UUID as a `String` with hyphens, please use [`add_hyphens`](#add_hyphensuuid-u128---string).
 
 ## `generate_strict_raw() -> u128`
 
-Behaves exactly like `generate_strict()`, but returns the raw `u128` UUID. If you need to format the raw UUID as a `String` with hyphens, please use [`add_hyphens`](#add_hyphensuuid-u128).
+Behaves exactly like [`generate_strict()`](#generate_strict---string), but returns the raw `u128` UUID. If you need to format the raw UUID as a `String` with hyphens, please use [`add_hyphens`](#add_hyphensuuid-u128---string).
 
 ## Monotonic Precision
 
