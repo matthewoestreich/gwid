@@ -19,7 +19,7 @@ let my_id = uuid_rs::v4::generate();
 
 ## `generate_raw() -> u128`
 
-Returns the raw `u128` UUID. If you need to format it as `String` with hyphens, please use [`add_hyphens`](#add_hyphensuuid-u128---string).
+Returns the raw `u128` UUID. If you need to format it as a hexadecimal encoded `String` with hyphens, please use [`add_hyphens`](#add_hyphensuuid-u128---string).
 
 **Usage**
 
@@ -73,11 +73,11 @@ let uuidv7 = uuid_rs::v7::generate_strict().expect("error generating strict");
 
 ## `generate_raw() -> u128`
 
-Behaves exactly like [`generate()`](#generate---string-1), but returns the raw `u128` UUID. If you need to format the raw UUID as a `String` with hyphens, please use [`add_hyphens`](#add_hyphensuuid-u128---string).
+Behaves exactly like [`generate()`](#generate---string-1), but returns the raw `u128` UUID. If you need to format the raw UUID as a hexadecimal encoded `String` with hyphens, please use [`add_hyphens`](#add_hyphensuuid-u128---string).
 
 ## `generate_strict_raw() -> u128`
 
-Behaves exactly like [`generate_strict()`](#generate_strict---string), but returns the raw `u128` UUID. If you need to format the raw UUID as a `String` with hyphens, please use [`add_hyphens`](#add_hyphensuuid-u128---string).
+Behaves exactly like [`generate_strict()`](#generate_strict---string), but returns the raw `u128` UUID. If you need to format the raw UUID as a hexadecimal encoded `String` with hyphens, please use [`add_hyphens`](#add_hyphensuuid-u128---string).
 
 ## Monotonic Precision
 
@@ -93,11 +93,11 @@ Behaves exactly like [`generate_strict()`](#generate_strict---string), but retur
 
 ## `add_hyphens(uuid: u128) -> String`
 
-Helper function to format a raw `u128` UUID to `String` with hyphens.
+Helper function to format a raw `u128` UUID to a hexadecimal encoded `String` with hyphens.
 
 ```rust
 use uuid_rs;
-let uuid = uuid_rs::v7::generate_raw().unwrap();
+let raw_uuid: u128 = 54839052801522565720884485497537422415;
 let with_hyphens = uuid_rs::add_hyphens(uuid);
 ```
 

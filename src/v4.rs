@@ -65,6 +65,8 @@ mod test {
     fn it_works() {
         let uuid = crate::v4::generate();
         println!("{uuid}");
+        let uuid = crate::v4::generate_raw();
+        println!("{uuid}");
     }
 
     #[test]
