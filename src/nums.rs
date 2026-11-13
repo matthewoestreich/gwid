@@ -46,7 +46,7 @@ pub mod math_random {
             this
         }
 
-        pub fn random(&mut self) -> f64 {
+        pub fn random_double(&mut self) -> f64 {
             if self.cache_index == 0 {
                 self.refill_cache();
             }
@@ -54,15 +54,25 @@ pub mod math_random {
             self.cache[self.cache_index]
         }
 
+        pub fn random(&mut self) -> u64 {
+            if self.cache_index == 0 {
+                self.refill_cache();
+            }
+            self.cache_index -= 1;
+            Self::reverse_to_double(self.cache[self.cache_index])
+        }
+
         fn refill_cache(&mut self) {
-            println!("\n\nrefilling cache\n\n");
             for i in (0usize..=(Self::K_CACHE_SIZE - 1) as usize).rev() {
-                println!("refill_cache | i= {i}");
                 let random =
                     RandomNumberGenerator::xorshift128(&mut self.state.s0, &mut self.state.s1);
                 self.cache[i] = RandomNumberGenerator::to_double(random);
             }
             self.cache_index = Self::K_CACHE_SIZE as usize;
+        }
+
+        fn reverse_to_double(dbl: f64) -> u64 {
+            ((dbl * (1_u64 << 53) as f64) as u64) << 11
         }
     }
 
@@ -76,12 +86,12 @@ pub mod math_random {
             // During startup Chrome seems to call Math.random 8 times,
             // so we also need to call it 8 times.
             for _ in 0..8 {
-                println!("burning value {}", mr.random());
+                println!("burning value {}", mr.random_double());
             }
 
             let mut rands = [0.0; 10];
             (0..10).for_each(|i| {
-                let rand = mr.random();
+                let rand = mr.random_double();
                 rands[i] = rand;
                 println!("{rand}");
             });
@@ -100,6 +110,17 @@ pub mod math_random {
             ];
 
             assert_eq!(expected, rands);
+        }
+
+        #[test]
+        fn math_rand_foo() {
+            use rand::RngExt;
+            let mut rng = MathRandom::initialize(Some(rand::rng().random()));
+            println!("MathRandom  = {}", rng.random() & ((1 << 62) - 1));
+            println!(
+                "rand::rng() = {}",
+                rand::rng().random::<u64>() & ((1 << 62) - 1)
+            );
         }
     }
 }

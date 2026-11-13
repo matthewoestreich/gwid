@@ -32,7 +32,11 @@ use crate::CLEAR_VARIANT_MASK;
 use crate::CLEAR_VERSION_MASK;
 use crate::VARIANT_SHIFT;
 use crate::VERSION_SHIFT;
+#[cfg(not(feature = "v7-crypto-rand"))]
+use crate::nums::math_random::MathRandom;
 use rand::RngExt;
+#[cfg(feature = "v7-crypto-rand")]
+use rand::rngs::ThreadRng;
 use std::cell::RefCell;
 use std::error;
 use std::fmt::Display;
@@ -53,6 +57,10 @@ use std::time::UNIX_EPOCH;
 thread_local! {
     static CONTEXT: RefCell<UUIDv7Context> =
         const { RefCell::new(UUIDv7Context { ts: 0, a: 0, b: 0 }) };
+}
+
+thread_local! {
+    static RNG: RefCell<Randomness> = RefCell::new(Randomness::new())
 }
 
 // Used by `generate_strict()` to maintain strict global monotonicity.
@@ -97,13 +105,13 @@ struct UUIDv7Context {
 
 pub fn generate() -> Result<String, UUIDv7Error> {
     let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?;
-    let random_b = rand::rng().random::<u64>();
+    let random_b = RNG.with_borrow_mut(|r| r.random());
     Ok(generate_with(timestamp, random_b))
 }
 
 pub fn generate_strict() -> Result<String, UUIDv7Error> {
     let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?;
-    let random_b = rand::rng().random::<u64>();
+    let random_b = RNG.with_borrow_mut(|r| r.random());
     generate_strict_with(timestamp, random_b)
 }
 
@@ -128,6 +136,8 @@ fn generate_strict_with(timestamp: Duration, random_b: u64) -> Result<String, UU
     let mut unix_ts_ms = timestamp.as_millis() & TIMESTAMP_MAX as u128;
     let mut random_a = derive_random_a(timestamp) & RANDOM_A_MAX;
     let mut random_b = random_b & RANDOM_B_MAX;
+
+    print!("random_b | before_ensure = ");
 
     #[cfg(feature = "v7-global-monotonicity")]
     let mut ctx = STRICT_CONTEXT
@@ -275,9 +285,32 @@ impl error::Error for UUIDv7Error {
     }
 }
 
+pub struct Randomness {
+    #[cfg(not(feature = "v7-crypto-rand"))]
+    rng: MathRandom,
+    #[cfg(feature = "v7-crypto-rand")]
+    rng: ThreadRng,
+}
+
+impl Randomness {
+    #[rustfmt::skip]
+    pub(crate) fn new() -> Self {
+        #[cfg(not(feature = "v7-crypto-rand"))]
+        { Self { rng: MathRandom::initialize(Some(rand::rng().random())) } }
+        #[cfg(feature = "v7-crypto-rand")]
+        { Self { rng: rand::rng() } }
+    }
+
+    #[rustfmt::skip]
+    pub fn random(&mut self) -> u64 {
+        self.rng.random()
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
+    use rand::RngExt;
     use std::time::{Duration, UNIX_EPOCH};
     use std::{
         collections::HashSet,
