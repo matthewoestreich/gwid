@@ -1,4 +1,4 @@
-# UUID
+# uuid-rs
 
 Just messing around trying to implement UUIDs in Rust.
 
