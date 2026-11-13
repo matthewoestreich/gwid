@@ -1,6 +1,6 @@
 # gwid
 
-![Crates.io Version](https://img.shields.io/crates/v/gwid?style=flat-square&logoSize=auto&color=%233d7ae3) [![docs.rs](https://img.shields.io/docsrs/gwid?style=flat-square&label=docs.rs)](https://docs.rs/gwid/latest/gwid/)
+[![Crates.io Version](https://img.shields.io/crates/v/gwid?style=flat-square&logoSize=auto&color=%233d7ae3)](https://crates.io/crates/gwid) [![docs.rs](https://img.shields.io/docsrs/gwid?style=flat-square&label=docs.rs)](https://docs.rs/gwid/latest/gwid/)
 
 Implementing [RFC 9562](https://www.rfc-editor.org/info/rfc9562/) ccompliant UUIDs (also known as GUIDs). The name gwid is derived from the phonetic pronunciation of GUID.
 
