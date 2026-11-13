@@ -60,6 +60,7 @@ thread_local! {
         const { RefCell::new(UUIDv7Context { ts: 0, a: 0, b: 0 }) };
 }
 
+// Thread local RNG. Underlying source depends upon feature flag.
 thread_local! {
     static RNG: RefCell<EntropySource> = RefCell::new(EntropySource::new())
 }
