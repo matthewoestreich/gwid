@@ -302,7 +302,6 @@ impl EntropySource {
         { Self { rng: rand::rng() } }
     }
 
-    #[rustfmt::skip]
     pub fn random(&mut self) -> u64 {
         self.rng.random()
     }
