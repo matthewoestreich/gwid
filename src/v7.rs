@@ -119,7 +119,7 @@ pub fn generate_strict_raw() -> Result<u128, UUIDv7Error> {
 }
 
 /// Returns tuple of parts where each element is: (unix_ts_ms, random_a, random_b)
-pub fn uuid_to_parts(uuid: &str) -> Result<(u128, u16, u64), std::num::ParseIntError> {
+pub fn uuid_to_parts(uuid: &str) -> Result<(u128, u16, u64), crate::GWIDError> {
     let value = crate::uuid_to_raw(uuid)?;
     let unix_ts_ms = (value >> TIMESTAMP_SHIFT) & TIMESTAMP_MAX as u128;
     let random_a = (value >> RANDOM_A_SHIFT) & RANDOM_A_MAX as u128;
@@ -236,15 +236,15 @@ fn ensure_strict_monotonicity(
             if ctx.b < RANDOM_B_MAX {
                 *random_b = u64::max(ctx.b + 1, *random_b);
             }
-            // If random_b overlowed and random_a has not overflowed: we need to increment
-            // random_a and reset randomb_b so we can use all values within new sub-ms value.
+            // If random_b overlowed and random_a has not overflowed;
+            // we need to increment random_a and reset randomb_b.
             else if ctx.a < RANDOM_A_MAX {
                 *random_a = ctx.a + 1;
                 *random_b = 0;
             }
-            // If random_a and random_b both overflowed and timestamp has not overflowed:
-            // we need to increment the timestamp and reset random_a and random_b so we can
-            // use all available value within the new timestamp.
+            // If random_a and random_b both overflowed and timestamp
+            // has not overflowed; we need to increment the timestamp
+            //  and reset random_a and random_b.
             else if ctx.ts < TIMESTAMP_MAX as u128 {
                 // Both random fields are exhausted. Advance the timestamp.
                 *unix_ts_ms = ctx.ts + 1;

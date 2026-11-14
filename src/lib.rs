@@ -27,8 +27,8 @@ pub fn uuid_to_raw_unchecked(uuid: &str) -> u128 {
 }
 
 /// Converts a `uuid` string into a u128.
-pub fn uuid_to_raw(uuid: &str) -> Result<u128, std::num::ParseIntError> {
-    u128::from_str_radix(&uuid.replace("-", ""), 16)
+pub fn uuid_to_raw(uuid: &str) -> Result<u128, GWIDError> {
+    Ok(u128::from_str_radix(&uuid.replace("-", ""), 16)?)
 }
 
 // Clears UUID Version bits (bits 48, 49, 50, and 51 when counting left->right and starting at 0)
@@ -39,6 +39,35 @@ pub(crate) const CLEAR_VERSION_MASK: u128 = 0xFFFFFFFFFFFF0FFFFFFFFFFFFFFFFFFF;
 pub(crate) const CLEAR_VARIANT_MASK: u128 = 0xFFFFFFFFFFFFFFFF3FFFFFFFFFFFFFFF;
 pub(crate) const VERSION_SHIFT: u128 = 76;
 pub(crate) const VARIANT_SHIFT: u128 = 62;
+
+#[derive(Debug)]
+pub enum GWIDError {
+    ParseUUIDError(std::num::ParseIntError),
+}
+
+impl std::fmt::Display for GWIDError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use GWIDError::*;
+        match self {
+            ParseUUIDError(parse_int_error) => write!(f, "Error parsing UUID {parse_int_error}"),
+        }
+    }
+}
+
+impl From<std::num::ParseIntError> for GWIDError {
+    fn from(error: std::num::ParseIntError) -> Self {
+        Self::ParseUUIDError(error)
+    }
+}
+
+impl std::error::Error for GWIDError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::ParseUUIDError(parse_int_err) => Some(parse_int_err),
+            // _ => None,
+        }
+    }
+}
 
 // Helper function to print bits
 #[allow(dead_code)]
