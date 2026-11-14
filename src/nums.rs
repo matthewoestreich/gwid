@@ -87,11 +87,8 @@ mod test {
 
         // During startup Chrome seems to call Math.random 8 times, so we also need to call it 8 times.
         for _ in 0..8 {
-            _ = math.random_double();
+            math.random_double();
         }
-
-        let mut rands = [0.0; 10];
-        (0..10).for_each(|i| rands[i] = math.random_double());
 
         let expected = [
             0.1623809348128048,
@@ -105,6 +102,8 @@ mod test {
             0.9414014356908873,
             0.6226657071438221,
         ];
+
+        let rands: [f64; 10] = std::array::from_fn(|_| math.random_double());
 
         assert_eq!(expected, rands);
     }
