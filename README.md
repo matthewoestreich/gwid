@@ -49,7 +49,7 @@ let second = "01a1d02e-eedb-7995-808d-0ba60b4a6dd4";
 
 If you require strict sub-millisecond monotonicity, use [`generate_strict()`](#generate_strict---string).
 
-[RFC 9562](https://www.rfc-editor.org/info/rfc9562/) does not require the random bits to be cryptographically secure, so we use a pseudorandom number generator for randomness. **If you want to use cryptographically secure bits for randomness, enable the [`v7-crypto-rand`](#v7-crypto-rand) feature flag!**
+[RFC 9562](https://www.rfc-editor.org/rfc/rfc9562/) does not require UUIDv7 random bits to be cryptographically secure. **To use cryptographically secure randomness, enable the [`v7-crypto-rand`](#v7-crypto-rand) feature flag.**
 
 **Usage**
 
@@ -62,7 +62,7 @@ let uuidv7 = gwid::v7::generate().expect("error generating");
 
 Guarantees **[strict](#monotonic-precision) thread-local monotonicity**. By default, monotonicity is maintained independently per thread. To guarantee **strict global monotonicity across threads**, enable the [`v7-global-monotonicity`](#v7-global-monotonicity) feature flag.
 
-[RFC 9562](https://www.rfc-editor.org/info/rfc9562/) does not require the random bits to be cryptographically secure, so we use a pseudorandom number generator for randomness. **If you want to use cryptographically secure bits for randomness, enable the [`v7-crypto-rand`](#v7-crypto-rand) feature flag!**
+[RFC 9562](https://www.rfc-editor.org/rfc/rfc9562/) does not require UUIDv7 random bits to be cryptographically secure. **To use cryptographically secure randomness, enable the [`v7-crypto-rand`](#v7-crypto-rand) feature flag.**
 
 **Usage**
 
@@ -152,6 +152,6 @@ Enable the feature in your `Cargo.toml`:
 gwid = { version = "0.1", features = ["v7-crypto-rand"] }
 ```
 
-When enabled cryptographically secure bits are used for randomness (specifically, the `random_b` field).
+When enabled, UUIDv7 IDS will use cryptographically secure bits for randomness (specifically, the `random_b` field).
 
-[RFC 9562](https://www.rfc-editor.org/info/rfc9562/) does not require the random bits to be cryptographically secure, so we use a pseudorandom number generator for randomness.
+j[RFC 9562](https://www.rfc-editor.org/rfc/rfc9562/) does not require UUIDv7 random bits to be cryptographically secure, but we give you the option.
