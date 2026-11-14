@@ -11,6 +11,7 @@ pub struct State {
     pub s1: u64,
 }
 
+// https://source.chromium.org/chromium/_/chromium/v8/v8/+/c4bf0d1b36dca14d5eaec1ed83ccd77518d2d01a:src/numbers/math-random.cc;drc=99f606174481f6e2f4809c4262122a30a25583af;bpv=0;bpt=0
 #[derive(Debug)]
 pub struct MathRandom {
     state: State,
@@ -82,14 +83,15 @@ mod test {
 
     #[test]
     fn matches_chrome() {
-        let mut mr = MathRandom::initialize(Some(1337));
+        let mut math = MathRandom::initialize(Some(1337));
+
         // During startup Chrome seems to call Math.random 8 times, so we also need to call it 8 times.
         for _ in 0..8 {
-            _ = mr.random_double();
+            _ = math.random_double();
         }
 
         let mut rands = [0.0; 10];
-        (0..10).for_each(|i| rands[i] = mr.random_double());
+        (0..10).for_each(|i| rands[i] = math.random_double());
 
         let expected = [
             0.1623809348128048,
@@ -108,6 +110,7 @@ mod test {
     }
 }
 
+// https://source.chromium.org/chromium/_/chromium/v8/v8/+/main:src/base/utils/random-number-generator.h;drc=99f606174481f6e2f4809c4262122a30a25583af;bpv=0;bpt=0
 #[derive(Default, Debug)]
 pub struct RandomNumberGenerator {
     state0: u64,
@@ -144,7 +147,7 @@ impl RandomNumberGenerator {
     }
 
     pub fn to_double(random: u64) -> f64 {
-        // 11 bits of state
+        // Get a random [0,2**53) by dropping 11 bits of the state.
         let random_0_to_2_53: f64 = (random >> 11) as f64;
         // Map this to [0, 1) by division with 2**53
         let k2_53: f64 = (1_u64 << 53) as f64;
@@ -160,7 +163,6 @@ impl RandomNumberGenerator {
         s1 ^= s0;
         s1 ^= s0 >> 26;
         *state1 = s1;
-
         s0.wrapping_add(s1)
     }
 
