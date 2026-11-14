@@ -154,4 +154,4 @@ gwid = { version = "0.1", features = ["v7-crypto-rand"] }
 
 When enabled, UUIDv7 IDS will use cryptographically secure bits for randomness (specifically, the `random_b` field).
 
-j[RFC 9562](https://www.rfc-editor.org/rfc/rfc9562/) does not require UUIDv7 random bits to be cryptographically secure, but we give you the option.
+[RFC 9562](https://www.rfc-editor.org/rfc/rfc9562/) does not require UUIDv7 random bits to be cryptographically secure, but we give you the option.
