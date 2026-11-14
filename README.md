@@ -19,14 +19,14 @@ let uuid = gwid::v4::generate();
 
 ## `generate_raw() -> u128`
 
-Returns the raw `u128` UUID. If you need to format it as a hexadecimal encoded `String` with hyphens, please use [`add_hyphens`](#add_hyphensuuid-u128---string).
+Returns the raw `u128` UUID. Use [`encode`](#encodeuuid-u128---string) to format raw `u128` as UUID.
 
 **Usage**
 
 ```rust
 use gwid;
 let uuid = gwid::v4::generate_raw();
-let with_hyphens = gwid::add_hyphens(uuid);
+let encoded = gwid::encode(uuid);
 ```
 
 # UUID Version 7
@@ -68,11 +68,11 @@ Guarantees **[strict](#monotonic-precision) thread-local monotonicity**. By defa
 
 ## `generate_raw() -> u128`
 
-Behaves exactly like [`generate()`](#generate---string-1), but returns the raw `u128` UUID. If you need to format the raw UUID as a hexadecimal encoded `String` with hyphens, please use [`add_hyphens`](#add_hyphensuuid-u128---string).
+Behaves exactly like [`generate()`](#generate---string-1), but returns the raw `u128` UUID. Use [`encode`](#encodeuuid-u128---string) to format raw `u128` as UUID.
 
 ## `generate_strict_raw() -> u128`
 
-Behaves exactly like [`generate_strict()`](#generate_strict---string), but returns the raw `u128` UUID. If you need to format the raw UUID as a hexadecimal encoded `String` with hyphens, please use [`add_hyphens`](#add_hyphensuuid-u128---string).
+Behaves exactly like [`generate_strict()`](#generate_strict---string), but returns the raw `u128` UUID. Use [`encode`](#encodeuuid-u128---string) to format raw `u128` as UUID.
 
 ## Monotonic Precision
 
@@ -86,14 +86,14 @@ Behaves exactly like [`generate_strict()`](#generate_strict---string), but retur
 
 # Helper Functions
 
-## `add_hyphens(uuid: u128) -> String`
+## `encode(uuid: u128) -> String`
 
-Format a raw `u128` UUID to a hexadecimal encoded `String` with hyphens.
+Encode a raw `u128` as UUID `String`. Formats as hexadecimal and inserts hyphens at proper indices.
 
 ```rust
 use gwid;
 let raw_uuid: u128 = 54839052801522565720884485497537422415;
-let with_hyphens = gwid::add_hyphens(raw_uuid);
+let encoded = gwid::encode(raw_uuid);
 ```
 
 ## `uuid_to_raw(uuid: &str) -> Result<u128, GWIDError>`

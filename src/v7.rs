@@ -140,7 +140,7 @@ fn generate_raw_with(timestamp: Duration, random_b: u64) -> u128 {
 }
 
 fn generate_with(timestamp: Duration, random_b: u64) -> String {
-    crate::add_hyphens(generate_raw_with(timestamp, random_b))
+    crate::encode(generate_raw_with(timestamp, random_b))
 }
 
 fn generate_strict_raw_with(timestamp: Duration, random_b: u64) -> Result<u128, UUIDv7Error> {
@@ -165,7 +165,7 @@ fn generate_strict_raw_with(timestamp: Duration, random_b: u64) -> Result<u128, 
 }
 
 fn generate_strict_with(timestamp: Duration, random_b: u64) -> Result<String, UUIDv7Error> {
-    Ok(crate::add_hyphens(generate_strict_raw_with(
+    Ok(crate::encode(generate_strict_raw_with(
         timestamp, random_b,
     )?))
 }
@@ -767,7 +767,7 @@ mod strict_global_monotonicity {
             | ((VARIANT as u128) << VARIANT_SHIFT)
             | (random_b as u128);
 
-        cb(&crate::add_hyphens(uuid));
+        cb(&crate::encode(uuid));
         Ok(())
     }
 

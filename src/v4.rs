@@ -54,7 +54,7 @@ fn generate_raw_with(random_bits: u128) -> u128 {
 }
 
 fn generate_with(random_bits: u128) -> String {
-    crate::add_hyphens(generate_raw_with(random_bits))
+    crate::encode(generate_raw_with(random_bits))
 }
 
 #[cfg(test)]

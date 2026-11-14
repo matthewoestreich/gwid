@@ -3,8 +3,9 @@ pub mod v7;
 
 pub(crate) mod nums;
 
-/// Formats `n` as hex and inserts hyphens at appropriate indicies.
-pub fn add_hyphens(n: u128) -> String {
+/// Encodes a `u128` as UUID.
+/// Formats as hexadecimal and inserts hyphens at proper indices.
+pub fn encode(n: u128) -> String {
     let uuid = format!("{n:032x}");
     format!(
         "{}-{}-{}-{}-{}",
@@ -88,10 +89,10 @@ mod lib_test {
     use super::*;
 
     #[test]
-    fn add_hyphens_to_raw_uuid() {
+    fn encode_raw_uuid() {
         let raw: u128 = 213409605541016776915642275756511741574;
         let expect: &str = "a08d31e9-c256-443e-8425-73c382264686";
-        let got = add_hyphens(raw);
+        let got = encode(raw);
         assert_eq!(
             expect, &got,
             "add_hyphens_to_raw_uuid | expected= {expect} got= {got}"
