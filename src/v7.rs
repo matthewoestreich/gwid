@@ -34,7 +34,7 @@ use crate::CLEAR_VERSION_MASK;
 use crate::VARIANT_SHIFT;
 use crate::VERSION_SHIFT;
 #[cfg(not(feature = "v7-crypto-rand"))]
-use crate::nums::math_random::MathRandom;
+use crate::nums::MathRandom;
 use rand::RngExt;
 #[cfg(feature = "v7-crypto-rand")]
 use rand::rngs::ThreadRng;
