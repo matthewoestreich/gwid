@@ -35,6 +35,11 @@ UUIDv7 is a 128-bit, time-ordered UUID that embeds a Unix timestamp (millisecond
 
 ## `generate() -> String`
 
+```rust
+use gwid;
+let uuidv7 = gwid::v7::generate().expect("error generating");
+```
+
 Generates UUIDv7 values with sub-millisecond [timestamp](#monotonic-precision) precision. Although thread-safe, UUIDs generated across multiple threads are not guaranteed to be globally monotonic.
 
 For example, two UUIDs generated within the same sub-millisecond bucket may be out of order:
@@ -42,7 +47,6 @@ For example, two UUIDs generated within the same sub-millisecond bucket may be o
 ```rust
 // First UUID (greater)
 let first = "01a1d02e-eedb-7995-82da-278257b8340d";
-
 // Second UUID (smaller)
 let second = "01a1d02e-eedb-7995-808d-0ba60b4a6dd4";
 ```
@@ -51,25 +55,16 @@ If you require strict sub-millisecond monotonicity, use [`generate_strict()`](#g
 
 [RFC 9562](https://www.rfc-editor.org/rfc/rfc9562/) does not require UUIDv7 random bits to be cryptographically secure. **To use cryptographically secure randomness, enable the [`v7-crypto-rand`](#v7-crypto-rand) feature flag.**
 
-**Usage**
-
-```rust
-use gwid;
-let uuidv7 = gwid::v7::generate().expect("error generating");
-```
-
 ## `generate_strict() -> String`
-
-Guarantees **[strict](#monotonic-precision) thread-local monotonicity**. By default, monotonicity is maintained independently per thread. To guarantee **strict global monotonicity across threads**, enable the [`v7-global-monotonicity`](#v7-global-monotonicity) feature flag.
-
-[RFC 9562](https://www.rfc-editor.org/rfc/rfc9562/) does not require UUIDv7 random bits to be cryptographically secure. **To use cryptographically secure randomness, enable the [`v7-crypto-rand`](#v7-crypto-rand) feature flag.**
-
-**Usage**
 
 ```rust
 use gwid;
 let uuidv7 = gwid::v7::generate_strict().expect("error generating strict");
 ```
+
+Guarantees **[strict](#monotonic-precision) thread-local monotonicity**. By default, monotonicity is maintained independently per thread. To guarantee **strict global monotonicity across threads**, enable the [`v7-global-monotonicity`](#v7-global-monotonicity) feature flag.
+
+[RFC 9562](https://www.rfc-editor.org/rfc/rfc9562/) does not require UUIDv7 random bits to be cryptographically secure. **To use cryptographically secure randomness, enable the [`v7-crypto-rand`](#v7-crypto-rand) feature flag.**
 
 ## `generate_raw() -> u128`
 
@@ -113,7 +108,7 @@ let raw_uuid = gwid::uuid_to_raw(uuid_str).expect("raw uuid");
 
 ## `uuid_to_raw_unchecked(uuid: &str) -> u128`
 
-**Panics** if something goes wrong during parsing!
+**Panics if something goes wrong during parsing!**
 
 Get the underlying raw `u128` value from a UUID.
 
@@ -152,6 +147,6 @@ Enable the feature in your `Cargo.toml`:
 gwid = { version = "0.1", features = ["v7-crypto-rand"] }
 ```
 
-When enabled, UUIDv7 IDS will use cryptographically secure bits for randomness (specifically, the `random_b` field).
+When enabled, UUIDv7 generation will use cryptographically secure bits for randomness (specifically, the `random_b` field).
 
 [RFC 9562](https://www.rfc-editor.org/rfc/rfc9562/) does not require UUIDv7 random bits to be cryptographically secure, but we give you the option.
