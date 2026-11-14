@@ -96,17 +96,17 @@ let raw_uuid: u128 = 54839052801522565720884485497537422415;
 let encoded = gwid::encode(raw_uuid);
 ```
 
-## `uuid_to_raw(uuid: &str) -> Result<u128, GWIDError>`
+## `decode(uuid: &str) -> Result<u128, GWIDError>`
 
 Get the underlying raw `u128` value from a UUID.
 
 ```rust
 use gwid;
 let uuid_str: &str = "a60d0392-a436-4e0f-b560-9f763b1d99a1";
-let raw_uuid = gwid::uuid_to_raw(uuid_str).expect("raw uuid");
+let raw_uuid = gwid::decode(uuid_str).expect("raw uuid");
 ```
 
-## `uuid_to_raw_unchecked(uuid: &str) -> u128`
+## `decode_unchecked(uuid: &str) -> u128`
 
 **Panics if something goes wrong during parsing!**
 
@@ -115,7 +115,7 @@ Get the underlying raw `u128` value from a UUID.
 ```rust
 use gwid;
 let uuid_str: &str = "a60d0392-a436-4e0f-b560-9f763b1d99a1";
-let raw_uuid = gwid::uuid_to_raw_unchecked(uuid_str);
+let raw_uuid = gwid::decode_unchecked(uuid_str);
 ```
 
 # Cargo Features
