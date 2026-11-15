@@ -7,12 +7,16 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
+use uuid::Uuid;
 
 const RANDOM_SPACE: f64 = (1 << 20) as f64;
 
 fn main() {
-    run_benchmark_concurrent_multi_threaded_throughput(|| gwid::v7::generate_raw().unwrap());
+    // run_benchmark_concurrent_multi_threaded_throughput(|| gwid::v7::generate_raw().unwrap());
     // run_concurrent_multi_threaded_collision_distribution(|| gwid::v7::generate_raw().unwrap());
+
+    run_benchmark_concurrent_multi_threaded_throughput(|| Uuid::now_v7().as_u128());
+    // run_concurrent_multi_threaded_collision_distribution(|| Uuid::now_v7().as_u128());
 }
 
 // -----------------------------------------------------------------------------------------------------------
@@ -33,8 +37,8 @@ where
     benchmark_concurrent_multi_threaded_throughput(
         id_fn,
         ConcurrentThroughputConfig {
-            ids_per_run: 100_000_000,
-            warmup_ids: 1_000,
+            ids_per_run: 1_000_000,
+            warmup_ids: 1,
             runs: 10,
             thread_counts: concurrent_thread_counts,
         },

@@ -150,10 +150,21 @@
 //! When enabled, UUIDv7 generation will use cryptographically secure bits for randomness (specifically, the `random_b` field).
 //!
 //! [RFC 9562](https://www.rfc-editor.org/rfc/rfc9562/) does not require UUIDv7 random bits to be cryptographically secure, but we give you the option.
+
+use crate::v7::UUIDv7Error;
 pub mod v4;
 pub mod v7;
 
 pub(crate) mod nums;
+
+pub enum Uuid {
+    Version4,
+    Version7 { strict: bool, crypto: bool },
+}
+
+// impl Uuid {
+//     pub fn generate_raw(&mut self) -> Result<u128,
+// }
 
 /// Encodes a `u128` as UUID.
 /// Formats as hexadecimal and inserts hyphens at proper indices.
@@ -180,7 +191,7 @@ pub fn decode_unchecked(uuid: &str) -> u128 {
 }
 
 /// Decodes a UUID `String` into a `u128`.
-pub fn decode(uuid: &str) -> Result<u128, GWIDError> {
+pub fn decode(uuid: &str) -> Result<u128, GwidError> {
     Ok(u128::from_str_radix(&uuid.replace("-", ""), 16)?)
 }
 
@@ -194,29 +205,38 @@ pub(crate) const VERSION_SHIFT: u128 = 76;
 pub(crate) const VARIANT_SHIFT: u128 = 62;
 
 #[derive(Debug)]
-pub enum GWIDError {
+pub enum GwidError {
     ParseUUIDError(std::num::ParseIntError),
+    UuidV7(UUIDv7Error),
 }
 
-impl std::fmt::Display for GWIDError {
+impl std::fmt::Display for GwidError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        use GWIDError::*;
+        use GwidError::*;
         match self {
             ParseUUIDError(parse_int_error) => write!(f, "Error parsing UUID {parse_int_error}"),
+            UuidV7(err) => write!(f, "{err}"),
         }
     }
 }
 
-impl From<std::num::ParseIntError> for GWIDError {
+impl From<UUIDv7Error> for GwidError {
+    fn from(error: UUIDv7Error) -> Self {
+        Self::UuidV7(error)
+    }
+}
+
+impl From<std::num::ParseIntError> for GwidError {
     fn from(error: std::num::ParseIntError) -> Self {
         Self::ParseUUIDError(error)
     }
 }
 
-impl std::error::Error for GWIDError {
+impl std::error::Error for GwidError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::ParseUUIDError(parse_int_err) => Some(parse_int_err),
+            Self::UuidV7(err) => Some(err),
             // _ => None,
         }
     }

@@ -16,10 +16,22 @@ categories = ["algorithms", "cryptography"]
 [dependencies]
 rand = "0.10.3"
 
+[dev-dependencies.uuid]
+version = "1.29.2"
+# Lets you generate random UUIDs
+features = ["v4", "v7"]
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies.gungraun]
+version = "0.20"
+
 [features]
 v7-crypto-rand = []
 v7-global-monotonicity = []
 default = []
+
+[[bench]]
+name = "gungraun_v7"
+harness = false
 
 [[bench]]
 name = "v7"

@@ -119,7 +119,7 @@ pub fn generate_strict_raw() -> Result<u128, UUIDv7Error> {
 }
 
 /// Returns tuple of parts where each element is: (unix_ts_ms, random_a, random_b)
-pub fn uuid_to_parts(uuid: &str) -> Result<(u128, u16, u64), crate::GWIDError> {
+pub fn uuid_to_parts(uuid: &str) -> Result<(u128, u16, u64), crate::GwidError> {
     let value = crate::decode(uuid)?;
     let unix_ts_ms = (value >> TIMESTAMP_SHIFT) & TIMESTAMP_MAX as u128;
     let random_a = (value >> RANDOM_A_SHIFT) & RANDOM_A_MAX as u128;
