@@ -1,6 +1,7 @@
 # Default recipe: list all available commands
 default:
     @just --list test
+    @just --usage test
 
 # Run unit tests
 all:

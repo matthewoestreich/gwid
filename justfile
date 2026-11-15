@@ -6,5 +6,3 @@ mod benches '.just/benches.just'
 # Default recipe: list all available commands
 default:
     @just --list
-
-
