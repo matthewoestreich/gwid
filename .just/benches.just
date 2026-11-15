@@ -9,9 +9,18 @@ all:
     just benches v7_gungraun 
 
 # Bench v7
-[arg('global', long='global', value='--features v7-global-monotonicity', help='Enable v7-global-monotonicity feature')]
-v7 global='':
-    cargo bench --bench v7 {{ global }}
+[arg('all', long='all', value='--all-features', help='Enable all features')]
+[arg('crypto', long='crypto', value='v7-crypto-rand', help='Enable v7-crypto-rand feature')]
+[arg('global', long='global', value='v7-global-monotonicity', help='Enable v7-global-monotonicity feature')]
+v7 all='' global='' crypto='':
+    #!/usr/bin/env bash
+    if [[ -n "$all" ]]; then 
+        cargo bench --bench v7 {{ all }}
+    elif [[ -z "$global" && -z "$crypto" ]]; then
+        cargo bench --bench v7
+    else 
+        cargo bench --bench v7 --features '{{ global }} {{ crypto }}'       
+    fi
 
 # Bench v7 gungraun
 v7_gungraun:
