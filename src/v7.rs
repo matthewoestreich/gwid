@@ -126,12 +126,12 @@ pub fn uuid_to_parts(uuid: &str) -> Result<(u128, u16, u64), crate::GwidError> {
 }
 
 fn generate_raw_with(timestamp: Duration, random_b: u64) -> u128 {
-    let mut unix_ts_ms = timestamp.as_millis() & TIMESTAMP_MAX as u128;
-    let mut random_a = derive_random_a(timestamp) & RANDOM_A_MAX;
+    let unix_ts_ms = timestamp.as_millis() & TIMESTAMP_MAX as u128;
+    let random_a = derive_random_a(timestamp) & RANDOM_A_MAX;
     let random_b = random_b & RANDOM_B_MAX;
 
-    CONTEXT
-        .with_borrow_mut(|ctx| ensure_monotonicity(&mut unix_ts_ms, &mut random_a, random_b, ctx));
+    let (unix_ts_ms, random_a) =
+        CONTEXT.with_borrow_mut(|ctx| ensure_monotonicity(unix_ts_ms, random_a, random_b, ctx));
 
     raw_uuid_from_parts(unix_ts_ms, random_a, random_b)
 }
@@ -141,22 +141,22 @@ fn generate_with(timestamp: Duration, random_b: u64) -> String {
 }
 
 fn generate_strict_raw_with(timestamp: Duration, random_b: u64) -> Result<u128, UUIDv7Error> {
-    let mut unix_ts_ms = timestamp.as_millis() & TIMESTAMP_MAX as u128;
-    let mut random_a = derive_random_a(timestamp) & RANDOM_A_MAX;
-    let mut random_b = random_b & RANDOM_B_MAX;
+    let unix_ts_ms = timestamp.as_millis() & TIMESTAMP_MAX as u128;
+    let random_a = derive_random_a(timestamp) & RANDOM_A_MAX;
+    let random_b = random_b & RANDOM_B_MAX;
 
     #[cfg(feature = "v7-global-monotonicity")]
-    let mut ctx = STRICT_CONTEXT
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let (unix_ts_ms, random_a, random_b) = {
+        let mut ctx = STRICT_CONTEXT
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
 
-    #[cfg(feature = "v7-global-monotonicity")]
-    ensure_strict_monotonicity(&mut unix_ts_ms, &mut random_a, &mut random_b, &mut ctx)?;
+        ensure_strict_monotonicity(unix_ts_ms, random_a, random_b, &mut ctx)?
+    };
 
     #[cfg(not(feature = "v7-global-monotonicity"))]
-    STRICT_CONTEXT.with_borrow_mut(|ctx| {
-        ensure_strict_monotonicity(&mut unix_ts_ms, &mut random_a, &mut random_b, ctx)
-    })?;
+    let (unix_ts_ms, random_a, random_b) = STRICT_CONTEXT
+        .with_borrow_mut(|ctx| ensure_strict_monotonicity(unix_ts_ms, random_a, random_b, ctx))?;
 
     Ok(raw_uuid_from_parts(unix_ts_ms, random_a, random_b))
 }
@@ -201,23 +201,27 @@ fn unpack_context(value: u128) -> (u128, u16, u64) {
 
 /// - Only handles clock drift
 fn ensure_monotonicity(
-    unix_ts_ms: &mut u128,
-    random_a: &mut u16,
+    unix_ts_ms: u128,
+    random_a: u16,
     random_b: u64,
     packed_ctx: &mut u128,
-) {
+) -> (u128, u16) {
     let (prev_ts, prev_a, _) = unpack_context(*packed_ctx);
 
-    // Enforce nondecreasing time
-    *unix_ts_ms = u128::max(prev_ts, *unix_ts_ms);
+    // Enforce nondecreasing time.
+    let unix_ts_ms = unix_ts_ms.max(prev_ts);
 
-    // We only need to enforce nondecreasing time in
-    // random_a if the timestamp has not advanced.
-    if *unix_ts_ms == prev_ts {
-        *random_a = u16::max(prev_a, *random_a);
-    }
+    // Only enforce nondecreasing random_a when the timestamp
+    // has not advanced.
+    let random_a = if unix_ts_ms == prev_ts {
+        random_a.max(prev_a)
+    } else {
+        random_a
+    };
 
-    *packed_ctx = pack_context(*unix_ts_ms, *random_a, random_b);
+    *packed_ctx = pack_context(unix_ts_ms, random_a, random_b);
+
+    (unix_ts_ms, random_a)
 }
 
 /// - Enforces nondecreasing time.
@@ -226,52 +230,52 @@ fn ensure_monotonicity(
 /// - Handles overflow.
 /// - Updates context.
 fn ensure_strict_monotonicity(
-    unix_ts_ms: &mut u128,
-    random_a: &mut u16,
-    random_b: &mut u64,
+    unix_ts_ms: u128,
+    random_a: u16,
+    random_b: u64,
     packed_ctx: &mut u128,
-) -> Result<(), UUIDv7Error> {
+) -> Result<(u128, u16, u64), UUIDv7Error> {
     let (prev_ts, prev_a, prev_b) = unpack_context(*packed_ctx);
 
     // Enforce nondecreasing time.
-    *unix_ts_ms = u128::max(prev_ts, *unix_ts_ms);
+    let mut unix_ts_ms = unix_ts_ms.max(prev_ts);
+    let mut random_a = random_a;
+    let mut random_b = random_b;
 
-    // Only need monotonicity if timestamps were in same sub-ms precision.
-    if *unix_ts_ms == prev_ts && *random_a <= prev_a {
-        // Prevent sub-ms precision from decreasing
-        *random_a = u16::max(prev_a, *random_a);
+    // Only need monotonicity if timestamps are equal.
+    if unix_ts_ms == prev_ts && random_a <= prev_a {
+        // Prevent sub-ms precision from decreasing.
+        random_a = random_a.max(prev_a);
 
-        // Only need to advance rand_b when rand_a has not advanced
+        // Only advance rand_b when rand_a has not advanced
         // and rand_b is not already greater than its previous value.
-        if *random_a == prev_a && *random_b <= prev_b {
+        if random_a == prev_a && random_b <= prev_b {
             // If random_b has not overflowed, increment it.
             if prev_b < RANDOM_B_MAX {
-                *random_b = u64::max(prev_b + 1, *random_b);
+                random_b = random_b.max(prev_b + 1);
             }
-            // If random_b overlowed and random_a has not overflowed;
-            // we need to increment random_a and reset randomb_b.
+            // If random_b overflowed and random_a has not,
+            // increment random_a and reset random_b.
             else if prev_a < RANDOM_A_MAX {
-                *random_a = prev_a + 1;
-                *random_b = 0;
+                random_a = prev_a + 1;
+                random_b = 0;
             }
-            // If random_a and random_b both overflowed and timestamp
-            // has not overflowed; we need to increment the timestamp
-            //  and reset random_a and random_b.
+            // If both random fields are exhausted, advance the timestamp.
             else if prev_ts < TIMESTAMP_MAX as u128 {
-                // Both random fields are exhausted. Advance the timestamp.
-                *unix_ts_ms = prev_ts + 1;
-                *random_a = 0;
-                *random_b = 0;
+                unix_ts_ms = prev_ts + 1;
+                random_a = 0;
+                random_b = 0;
             }
-            // All fields overflowed
+            // All fields are exhausted.
             else {
                 return Err(UUIDv7Error::Exhausted);
             }
         }
     }
 
-    *packed_ctx = pack_context(*unix_ts_ms, *random_a, *random_b);
-    Ok(())
+    *packed_ctx = pack_context(unix_ts_ms, random_a, random_b);
+
+    Ok((unix_ts_ms, random_a, random_b))
 }
 
 #[derive(Debug)]
@@ -397,11 +401,11 @@ mod test {
         let ctx_b: u64 = 100;
         let mut ctx = pack_context(ctx_ts, ctx_a, ctx_b);
 
-        let mut ts = 99;
-        let mut a = 100;
+        let ts = 99;
+        let a = 100;
         let b = 100;
 
-        ensure_monotonicity(&mut ts, &mut a, b, &mut ctx);
+        let (ts, a) = ensure_monotonicity(ts, a, b, &mut ctx);
 
         assert_eq!(ts, 100);
         assert_eq!(a, 100);
@@ -415,11 +419,11 @@ mod test {
         let ctx_b: u64 = 100;
         let mut ctx = pack_context(ctx_ts, ctx_a, ctx_b);
 
-        let mut ts = 100;
-        let mut a = 99;
+        let ts = 100;
+        let a = 99;
         let b = 100;
 
-        ensure_monotonicity(&mut ts, &mut a, b, &mut ctx);
+        let (ts, a) = ensure_monotonicity(ts, a, b, &mut ctx);
 
         assert_eq!(ts, 100);
         assert_eq!(a, 100);
@@ -591,17 +595,18 @@ mod test {
         let ctx_b = 200;
         let mut ctx = pack_context(ctx_ts, ctx_a, ctx_b);
 
-        let mut timestamp = 100;
-        let mut random_a = 100;
-        let mut random_b = 150;
+        let timestamp = 100;
+        let random_a = 100;
+        let random_b = 150;
 
-        ensure_strict_monotonicity(&mut timestamp, &mut random_a, &mut random_b, &mut ctx).unwrap();
+        let (timestamp, random_a, random_b) =
+            ensure_strict_monotonicity(timestamp, random_a, random_b, &mut ctx).unwrap();
 
         assert_eq!(timestamp, 100);
         assert_eq!(random_a, 100);
         assert_eq!(
             random_b, 201,
-            "expected randomb_b to equal 201, got={random_b}"
+            "expected random_b to equal 201, got={random_b}"
         );
     }
 
@@ -612,11 +617,12 @@ mod test {
         let ctx_b = 200;
         let mut ctx = pack_context(ctx_ts, ctx_a, ctx_b);
 
-        let mut timestamp = 100;
-        let mut random_a = 101;
-        let mut random_b = 50;
+        let timestamp = 100;
+        let random_a = 101;
+        let random_b = 50;
 
-        ensure_strict_monotonicity(&mut timestamp, &mut random_a, &mut random_b, &mut ctx).unwrap();
+        let (_, random_a, random_b) =
+            ensure_strict_monotonicity(timestamp, random_a, random_b, &mut ctx).unwrap();
 
         assert_eq!(random_a, 101);
         assert_eq!(random_b, 50);
@@ -629,11 +635,12 @@ mod test {
         let ctx_b = 200;
         let mut ctx = pack_context(ctx_ts, ctx_a, ctx_b);
 
-        let mut timestamp = 101;
-        let mut random_a = 100;
-        let mut random_b = 300;
+        let timestamp = 101;
+        let random_a = 100;
+        let random_b = 300;
 
-        ensure_strict_monotonicity(&mut timestamp, &mut random_a, &mut random_b, &mut ctx).unwrap();
+        let (_, _, random_b) =
+            ensure_strict_monotonicity(timestamp, random_a, random_b, &mut ctx).unwrap();
 
         assert_eq!(random_b, 300);
     }
@@ -645,11 +652,12 @@ mod test {
         let ctx_b = 200;
         let mut ctx = pack_context(ctx_ts, ctx_a, ctx_b);
 
-        let mut timestamp = 100;
-        let mut random_a = 101;
-        let mut random_b = 50;
+        let timestamp = 100;
+        let random_a = 101;
+        let random_b = 50;
 
-        ensure_strict_monotonicity(&mut timestamp, &mut random_a, &mut random_b, &mut ctx).unwrap();
+        let (_, _, random_b) =
+            ensure_strict_monotonicity(timestamp, random_a, random_b, &mut ctx).unwrap();
 
         assert_eq!(random_b, 50);
     }
@@ -661,11 +669,12 @@ mod test {
         let ctx_b = 200;
         let mut ctx = pack_context(ctx_ts, ctx_a, ctx_b);
 
-        let mut timestamp = 99;
-        let mut random_a = 100;
-        let mut random_b = 200;
+        let timestamp = 99;
+        let random_a = 100;
+        let random_b = 200;
 
-        ensure_strict_monotonicity(&mut timestamp, &mut random_a, &mut random_b, &mut ctx).unwrap();
+        let (timestamp, random_a, random_b) =
+            ensure_strict_monotonicity(timestamp, random_a, random_b, &mut ctx).unwrap();
 
         assert_eq!(timestamp, 100);
         assert_eq!(random_a, 100);
@@ -679,11 +688,12 @@ mod test {
         let ctx_b = RANDOM_B_MAX;
         let mut ctx = pack_context(ctx_ts, ctx_a, ctx_b);
 
-        let mut timestamp = 101;
-        let mut random_a = 10;
-        let mut random_b = 20;
+        let timestamp = 101;
+        let random_a = 10;
+        let random_b = 20;
 
-        ensure_strict_monotonicity(&mut timestamp, &mut random_a, &mut random_b, &mut ctx).unwrap();
+        let (timestamp, random_a, random_b) =
+            ensure_strict_monotonicity(timestamp, random_a, random_b, &mut ctx).unwrap();
 
         assert_eq!(timestamp, 101);
         assert_eq!(random_a, 10);
@@ -738,15 +748,16 @@ mod strict_global_monotonicity {
     {
         let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?;
         let random_b = rand::rng().random::<u64>();
-        let mut unix_ts_ms = timestamp.as_millis() & TIMESTAMP_MAX as u128;
-        let mut random_a = derive_random_a(timestamp) & RANDOM_A_MAX;
-        let mut random_b = random_b & RANDOM_B_MAX;
+        let unix_ts_ms = timestamp.as_millis() & TIMESTAMP_MAX as u128;
+        let random_a = derive_random_a(timestamp) & RANDOM_A_MAX;
+        let random_b = random_b & RANDOM_B_MAX;
 
         let mut ctx = STRICT_CONTEXT
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
 
-        ensure_strict_monotonicity(&mut unix_ts_ms, &mut random_a, &mut random_b, &mut ctx)?;
+        let (unix_ts_ms, random_a, random_b) =
+            ensure_strict_monotonicity(unix_ts_ms, random_a, random_b, &mut ctx)?;
 
         let uuid = (unix_ts_ms << TIMESTAMP_SHIFT) & CLEAR_VERSION_MASK
             | ((VERSION as u128) << VERSION_SHIFT)
