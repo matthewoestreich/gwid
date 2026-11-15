@@ -1,4 +1,4 @@
-# Default recipe: list all available commands
+# Default recipe: list all available commands. **ALL THESE TESTS USE `nextest`!**
 default:
     @just --list test
     @just --usage test
