@@ -33,6 +33,10 @@ name = "v7"
 harness = false
 # required-features = ['v7-crypto-rand']
 
+[profile.bench-debug]
+inherits = "bench"
+debug = true
+
 [features]
 v7-crypto-rand = []
 v7-global-monotonicity = []

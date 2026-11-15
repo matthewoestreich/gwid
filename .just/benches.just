@@ -14,4 +14,8 @@ v7 global='':
 
 # Bench v7 gungraun
 v7_gungraun:
-    ./benches/run_gungraun_v7.sh 
+    ../benches/run_gungraun_v7.sh 
+
+# Bench v7 gungraun with debug symbols
+v7_gungraun_debug:
+    ../benches/run_gungraun_v7.sh bench-debug

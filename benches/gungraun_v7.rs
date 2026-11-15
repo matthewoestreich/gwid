@@ -45,7 +45,7 @@ mod bench {
 }
 
 use gungraun::prelude::*;
-use gungraun::{Tool, main};
+use gungraun::{Dhat, main};
 
 // GLOBAL MONO ENABLED
 #[cfg(all(not(target_arch = "wasm32"), feature = "v7-global-monotonicity"))]
@@ -53,7 +53,7 @@ use bench::v7gungraun_global_mono;
 #[rustfmt::skip]
 #[cfg(all(not(target_arch = "wasm32"), feature = "v7-global-monotonicity"))]
 main!(
-    config = LibraryBenchmarkConfig::default().default_tool(Tool::DHAT),
+    config = LibraryBenchmarkConfig::default().tool(Dhat::default()),
     library_benchmark_groups = v7gungraun_global_mono
 );
 
@@ -62,7 +62,7 @@ main!(
 use bench::v7gungraun;
 #[cfg(all(not(target_arch = "wasm32"), not(feature = "v7-global-monotonicity")))]
 main!(
-    config = LibraryBenchmarkConfig::default().default_tool(Tool::DHAT),
+    config = LibraryBenchmarkConfig::default().tool(Dhat::default()),
     library_benchmark_groups = v7gungraun
 );
 
