@@ -10,7 +10,7 @@ all:
 # Bench v7
 [arg('global', long='global', value='--features v7-global-monotonicity', help='Enable v7-global-monotonicity feature')]
 v7 global='':
-    cargo bench --bench v7 {{global}}
+    cargo bench --bench v7 {{ global }}
 
 # Bench v7 gungraun
 v7_gungraun:
@@ -18,4 +18,6 @@ v7_gungraun:
 
 # Bench v7 gungraun with debug symbols
 v7_gungraun_debug:
-    ../benches/run_gungraun_v7.sh bench-debug
+    #!/usr/bin/env bash
+    PROFILE="bench-debug"
+    ../benches/run_gungraun_v7.sh "$PROFILE"
