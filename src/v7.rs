@@ -205,7 +205,6 @@ fn ensure_monotonicity(
     random_a: &mut u16,
     random_b: u64,
     packed_ctx: &mut u128,
-    // ctx: &mut UUIDv7Context,
 ) {
     let (mut prev_ts, mut prev_a, _) = unpack_context(*packed_ctx);
     // Enforce nondecreasing time
@@ -232,7 +231,6 @@ fn ensure_strict_monotonicity(
     unix_ts_ms: &mut u128,
     random_a: &mut u16,
     random_b: &mut u64,
-    //ctx: &mut UUIDv7Context,
     packed_ctx: &mut u128,
 ) -> Result<(), UUIDv7Error> {
     let (mut prev_ts, mut prev_a, mut prev_b) = unpack_context(*packed_ctx);
