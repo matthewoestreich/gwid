@@ -24,11 +24,6 @@ features = ["v4", "v7"]
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies.gungraun]
 version = "0.20"
 
-[features]
-v7-crypto-rand = []
-v7-global-monotonicity = []
-default = []
-
 [[bench]]
 name = "gungraun_v7"
 harness = false
@@ -37,3 +32,8 @@ harness = false
 name = "v7"
 harness = false
 # required-features = ['v7-crypto-rand']
+
+[features]
+v7-crypto-rand = []
+v7-global-monotonicity = []
+default = []

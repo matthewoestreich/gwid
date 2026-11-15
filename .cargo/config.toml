@@ -2,3 +2,5 @@
 t-all = "nextest run --all-features"
 t-global = "nextest run --features v7-global-monotonicity"
 t = "nextest run"
+b-all = "bench --all-features"
+b-v7-all = "bench --bench v7 --all-features"

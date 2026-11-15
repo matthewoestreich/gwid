@@ -56,8 +56,7 @@ use std::time::UNIX_EPOCH;
 // Global synchronization is unnecessary because monotonicity across threads
 // and within the same sub-millisecond bucket is not guaranteed.
 thread_local! {
-    static CONTEXT: RefCell<UUIDv7Context> =
-        const { RefCell::new(UUIDv7Context { ts: 0, a: 0, b: 0 }) };
+    static CONTEXT: RefCell<u128> = const { RefCell::new(0) };
 }
 
 // Thread local RNG. Underlying source depends upon feature flag.
@@ -68,15 +67,13 @@ thread_local! {
 // Used by `generate_strict()` to maintain strict global monotonicity.
 // Uses a mutex to synchronize UUID generation across threads.
 #[cfg(feature = "v7-global-monotonicity")]
-static STRICT_CONTEXT: LazyLock<Mutex<UUIDv7Context>> =
-    LazyLock::new(|| Mutex::new(UUIDv7Context { ts: 0, a: 0, b: 0 }));
+static STRICT_CONTEXT: LazyLock<Mutex<u128>> = LazyLock::new(|| Mutex::new(0));
 
 // Used by `generate_strict()` to maintain strict thread-local monotonicity.
 // No synchronization between threads is necessary.
 #[cfg(not(feature = "v7-global-monotonicity"))]
 thread_local! {
-    static STRICT_CONTEXT: RefCell<UUIDv7Context> =
-        const { RefCell::new(UUIDv7Context { ts: 0, a: 0, b: 0 }) };
+    static STRICT_CONTEXT: RefCell<u128> =  const { RefCell::new(0) };
 }
 
 const RANDOM_A_BITS: u8 = 12;
@@ -189,25 +186,41 @@ fn raw_uuid_from_parts(unix_ts_ms: u128, random_a: u16, random_b: u64) -> u128 {
         | (random_b as u128)
 }
 
+fn pack_context(ts: u128, a: u16, b: u64) -> u128 {
+    ((ts & TIMESTAMP_MAX as u128) << (RANDOM_A_BITS + RANDOM_B_BITS))
+        | (((a & RANDOM_A_MAX) as u128) << RANDOM_B_BITS)
+        | ((b & RANDOM_B_MAX) as u128)
+}
+
+fn unpack_context(value: u128) -> (u128, u16, u64) {
+    let ts = value >> (RANDOM_A_BITS + RANDOM_B_BITS);
+    let a = ((value >> RANDOM_B_BITS) & RANDOM_A_MAX as u128) as u16;
+    let b = (value & RANDOM_B_MAX as u128) as u64;
+    (ts, a, b)
+}
+
 /// - Only handles clock drift
 fn ensure_monotonicity(
     unix_ts_ms: &mut u128,
     random_a: &mut u16,
     random_b: u64,
-    ctx: &mut UUIDv7Context,
+    packed_ctx: &mut u128,
+    // ctx: &mut UUIDv7Context,
 ) {
+    let (mut prev_ts, mut prev_a, _) = unpack_context(*packed_ctx);
     // Enforce nondecreasing time
-    *unix_ts_ms = u128::max(ctx.ts, *unix_ts_ms);
+    *unix_ts_ms = u128::max(prev_ts, *unix_ts_ms);
 
     // We only need to enforce nondecreasing time in
     // random_a if the timestamp has not advanced.
-    if *unix_ts_ms == ctx.ts {
-        *random_a = u16::max(ctx.a, *random_a);
+    if *unix_ts_ms == prev_ts {
+        *random_a = u16::max(prev_a, *random_a);
     }
 
-    ctx.ts = *unix_ts_ms;
-    ctx.a = *random_a;
-    ctx.b = random_b;
+    prev_ts = *unix_ts_ms;
+    prev_a = *random_a;
+
+    *packed_ctx = pack_context(prev_ts, prev_a, random_b);
 }
 
 /// - Enforces nondecreasing time.
@@ -219,35 +232,38 @@ fn ensure_strict_monotonicity(
     unix_ts_ms: &mut u128,
     random_a: &mut u16,
     random_b: &mut u64,
-    ctx: &mut UUIDv7Context,
+    //ctx: &mut UUIDv7Context,
+    packed_ctx: &mut u128,
 ) -> Result<(), UUIDv7Error> {
+    let (mut prev_ts, mut prev_a, mut prev_b) = unpack_context(*packed_ctx);
+
     // Enforce nondecreasing time.
-    *unix_ts_ms = u128::max(ctx.ts, *unix_ts_ms);
+    *unix_ts_ms = u128::max(prev_ts, *unix_ts_ms);
 
     // Only need monotonicity if timestamps were in same sub-ms precision.
-    if *unix_ts_ms == ctx.ts && *random_a <= ctx.a {
+    if *unix_ts_ms == prev_ts && *random_a <= prev_a {
         // Prevent sub-ms precision from decreasing
-        *random_a = u16::max(ctx.a, *random_a);
+        *random_a = u16::max(prev_a, *random_a);
 
         // Only need to advance rand_b when rand_a has not advanced
         // and rand_b is not already greater than its previous value.
-        if *random_a == ctx.a && *random_b <= ctx.b {
+        if *random_a == prev_a && *random_b <= prev_b {
             // If random_b has not overflowed, increment it.
-            if ctx.b < RANDOM_B_MAX {
-                *random_b = u64::max(ctx.b + 1, *random_b);
+            if prev_b < RANDOM_B_MAX {
+                *random_b = u64::max(prev_b + 1, *random_b);
             }
             // If random_b overlowed and random_a has not overflowed;
             // we need to increment random_a and reset randomb_b.
-            else if ctx.a < RANDOM_A_MAX {
-                *random_a = ctx.a + 1;
+            else if prev_a < RANDOM_A_MAX {
+                *random_a = prev_a + 1;
                 *random_b = 0;
             }
             // If random_a and random_b both overflowed and timestamp
             // has not overflowed; we need to increment the timestamp
             //  and reset random_a and random_b.
-            else if ctx.ts < TIMESTAMP_MAX as u128 {
+            else if prev_ts < TIMESTAMP_MAX as u128 {
                 // Both random fields are exhausted. Advance the timestamp.
-                *unix_ts_ms = ctx.ts + 1;
+                *unix_ts_ms = prev_ts + 1;
                 *random_a = 0;
                 *random_b = 0;
             }
@@ -258,9 +274,10 @@ fn ensure_strict_monotonicity(
         }
     }
 
-    ctx.ts = *unix_ts_ms;
-    ctx.a = *random_a;
-    ctx.b = *random_b;
+    prev_ts = *unix_ts_ms;
+    prev_a = *random_a;
+    prev_b = *random_b;
+    *packed_ctx = pack_context(prev_ts, prev_a, prev_b);
     Ok(())
 }
 
@@ -296,17 +313,6 @@ impl error::Error for UUIDv7Error {
             _ => None,
         }
     }
-}
-
-/// To hold global state for monotonic id generation
-#[derive(Debug)]
-struct UUIDv7Context {
-    /// previous timestamp (uses ms)
-    pub(crate) ts: u128,
-    /// previous random_a
-    pub(crate) a: u16,
-    /// previous random_b
-    pub(crate) b: u64,
 }
 
 #[cfg(not(feature = "v7-crypto-rand"))]
@@ -353,10 +359,6 @@ mod test {
         thread,
     };
 
-    fn fresh_ctx() -> UUIDv7Context {
-        UUIDv7Context { ts: 0, a: 0, b: 0 }
-    }
-
     #[test]
     fn it_works() {
         let _uuid = crate::v7::generate_strict().unwrap();
@@ -397,11 +399,10 @@ mod test {
 
     #[test]
     fn non_monotonic_clock_drift_timestamp() {
-        let mut ctx = UUIDv7Context {
-            ts: 100,
-            a: 100,
-            b: 100,
-        };
+        let ctx_ts: u128 = 100;
+        let ctx_a: u16 = 100;
+        let ctx_b: u64 = 100;
+        let mut ctx = pack_context(ctx_ts, ctx_a, ctx_b);
 
         let mut ts = 99;
         let mut a = 100;
@@ -416,11 +417,10 @@ mod test {
 
     #[test]
     fn non_monotonic_clock_drift_random_a_sub_ms() {
-        let mut ctx = UUIDv7Context {
-            ts: 100,
-            a: 100,
-            b: 100,
-        };
+        let ctx_ts: u128 = 100;
+        let ctx_a: u16 = 100;
+        let ctx_b: u64 = 100;
+        let mut ctx = pack_context(ctx_ts, ctx_a, ctx_b);
 
         let mut ts = 100;
         let mut a = 99;
@@ -593,11 +593,10 @@ mod test {
 
     #[test]
     fn monotonicity_increments_random_b_when_timestamp_and_random_a_are_unchanged() {
-        let mut ctx = fresh_ctx();
-
-        ctx.ts = 100;
-        ctx.a = 100;
-        ctx.b = 200;
+        let ctx_ts = 100;
+        let ctx_a = 100;
+        let ctx_b = 200;
+        let mut ctx = pack_context(ctx_ts, ctx_a, ctx_b);
 
         let mut timestamp = 100;
         let mut random_a = 100;
@@ -615,11 +614,10 @@ mod test {
 
     #[test]
     fn monotonicity_preserves_higher_random_a() {
-        let mut ctx = fresh_ctx();
-
-        ctx.ts = 100;
-        ctx.a = 100;
-        ctx.b = 200;
+        let ctx_ts = 100;
+        let ctx_a = 100;
+        let ctx_b = 200;
+        let mut ctx = pack_context(ctx_ts, ctx_a, ctx_b);
 
         let mut timestamp = 100;
         let mut random_a = 101;
@@ -633,11 +631,10 @@ mod test {
 
     #[test]
     fn monotonicity_preserves_higher_random_b_when_timestamp_and_random_a_match() {
-        let mut ctx = fresh_ctx();
-
-        ctx.ts = 100;
-        ctx.a = 100;
-        ctx.b = 200;
+        let ctx_ts = 100;
+        let ctx_a = 100;
+        let ctx_b = 200;
+        let mut ctx = pack_context(ctx_ts, ctx_a, ctx_b);
 
         let mut timestamp = 101;
         let mut random_a = 100;
@@ -650,11 +647,10 @@ mod test {
 
     #[test]
     fn monotonicity_does_not_increment_random_b_when_random_a_differs() {
-        let mut ctx = fresh_ctx();
-
-        ctx.ts = 100;
-        ctx.a = 100;
-        ctx.b = 200;
+        let ctx_ts = 100;
+        let ctx_a = 100;
+        let ctx_b = 200;
+        let mut ctx = pack_context(ctx_ts, ctx_a, ctx_b);
 
         let mut timestamp = 100;
         let mut random_a = 101;
@@ -667,11 +663,10 @@ mod test {
 
     #[test]
     fn monotonicity_clamps_backwards_timestamp() {
-        let mut ctx = fresh_ctx();
-
-        ctx.ts = 100;
-        ctx.a = 100;
-        ctx.b = 200;
+        let ctx_ts = 100;
+        let ctx_a = 100;
+        let ctx_b = 200;
+        let mut ctx = pack_context(ctx_ts, ctx_a, ctx_b);
 
         let mut timestamp = 99;
         let mut random_a = 100;
@@ -686,11 +681,10 @@ mod test {
 
     #[test]
     fn monotonicity_allows_timestamp_to_advance() {
-        let mut ctx = fresh_ctx();
-
-        ctx.ts = 100;
-        ctx.a = 4095;
-        ctx.b = RANDOM_B_MAX;
+        let ctx_ts = 100;
+        let ctx_a = RANDOM_A_MAX;
+        let ctx_b = RANDOM_B_MAX;
+        let mut ctx = pack_context(ctx_ts, ctx_a, ctx_b);
 
         let mut timestamp = 101;
         let mut random_a = 10;

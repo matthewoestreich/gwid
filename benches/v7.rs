@@ -7,16 +7,46 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
+#[allow(unused_imports)]
 use uuid::Uuid;
 
 const RANDOM_SPACE: f64 = (1 << 20) as f64;
 
 fn main() {
-    // run_benchmark_concurrent_multi_threaded_throughput(|| gwid::v7::generate_raw().unwrap());
-    // run_concurrent_multi_threaded_collision_distribution(|| gwid::v7::generate_raw().unwrap());
+    #[cfg(not(feature = "v7-global-monotonicity"))]
+    {
+        println!("\n\n\nRUNNING GWID (generate_strict_raw(), NOT v7-global-monotonicity)\n");
+        run_benchmark_concurrent_multi_threaded_throughput(|| {
+            gwid::v7::generate_strict_raw().unwrap()
+        });
+        // run_concurrent_multi_threaded_collision_distribution(|| gwid::v7::generate_raw().unwrap());
+    }
 
+    #[cfg(not(feature = "v7-global-monotonicity"))]
+    {
+        println!("\n\n\nRUNNING GWID (generate_raw(), NOT v7-global-monotonicity)\n");
+        run_benchmark_concurrent_multi_threaded_throughput(|| gwid::v7::generate_raw().unwrap());
+        // run_concurrent_multi_threaded_collision_distribution(|| gwid::v7::generate_raw().unwrap());
+    }
+
+    // ------------------------------------------------------------------------------------------
+    // TO COMPARE AGAINST THE `uuid` CRATE
+    // ------------------------------------------------------------------------------------------
+    //
+    println!("\n\n\nRUNNING UUID\n");
     run_benchmark_concurrent_multi_threaded_throughput(|| Uuid::now_v7().as_u128());
     // run_concurrent_multi_threaded_collision_distribution(|| Uuid::now_v7().as_u128());
+    //
+    // ------------------------------------------------------------------------------------------
+
+    #[cfg(feature = "v7-global-monotonicity")]
+    {
+        println!("\n\n\nRUNNING GWID (generate_strict_raw(), v7-global-monotonicity)\n");
+        run_benchmark_concurrent_multi_threaded_throughput(|| {
+            gwid::v7::generate_strict_raw().unwrap()
+        });
+        // run_concurrent_multi_threaded_collision_distribution(|| gwid::v7::generate_raw().unwrap());
+    }
 }
 
 // -----------------------------------------------------------------------------------------------------------
@@ -29,17 +59,23 @@ fn run_benchmark_concurrent_multi_threaded_throughput<F>(id_fn: F)
 where
     F: Fn() -> u128 + Send + Sync + 'static,
 {
+    #[cfg(not(feature = "v7-global-monotonicity"))]
     let mut concurrent_thread_counts = vec![2, 4, 8, 12, 16, 24, 32, 64];
+
+    #[cfg(feature = "v7-global-monotonicity")]
+    let mut concurrent_thread_counts = vec![8, 16, 32, 64];
+
     // Shuffle order we test threads in. Do this 10 times to really shake things up.
     for _ in 0..10 {
         shuffle_vec(&mut concurrent_thread_counts);
     }
+
     benchmark_concurrent_multi_threaded_throughput(
         id_fn,
         ConcurrentThroughputConfig {
             ids_per_run: 1_000_000,
-            warmup_ids: 1,
-            runs: 10,
+            warmup_ids: 1_000,
+            runs: 15,
             thread_counts: concurrent_thread_counts,
         },
     );
