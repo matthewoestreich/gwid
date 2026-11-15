@@ -274,7 +274,6 @@ fn ensure_strict_monotonicity(
     }
 
     *packed_ctx = pack_context(unix_ts_ms, random_a, random_b);
-
     Ok((unix_ts_ms, random_a, random_b))
 }
 
