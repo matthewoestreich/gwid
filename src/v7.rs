@@ -206,7 +206,8 @@ fn ensure_monotonicity(
     random_b: u64,
     packed_ctx: &mut u128,
 ) {
-    let (mut prev_ts, mut prev_a, _) = unpack_context(*packed_ctx);
+    let (prev_ts, prev_a, _) = unpack_context(*packed_ctx);
+
     // Enforce nondecreasing time
     *unix_ts_ms = u128::max(prev_ts, *unix_ts_ms);
 
@@ -216,10 +217,7 @@ fn ensure_monotonicity(
         *random_a = u16::max(prev_a, *random_a);
     }
 
-    prev_ts = *unix_ts_ms;
-    prev_a = *random_a;
-
-    *packed_ctx = pack_context(prev_ts, prev_a, random_b);
+    *packed_ctx = pack_context(*unix_ts_ms, *random_a, random_b);
 }
 
 /// - Enforces nondecreasing time.
@@ -233,7 +231,7 @@ fn ensure_strict_monotonicity(
     random_b: &mut u64,
     packed_ctx: &mut u128,
 ) -> Result<(), UUIDv7Error> {
-    let (mut prev_ts, mut prev_a, mut prev_b) = unpack_context(*packed_ctx);
+    let (prev_ts, prev_a, prev_b) = unpack_context(*packed_ctx);
 
     // Enforce nondecreasing time.
     *unix_ts_ms = u128::max(prev_ts, *unix_ts_ms);
@@ -272,10 +270,7 @@ fn ensure_strict_monotonicity(
         }
     }
 
-    prev_ts = *unix_ts_ms;
-    prev_a = *random_a;
-    prev_b = *random_b;
-    *packed_ctx = pack_context(prev_ts, prev_a, prev_b);
+    *packed_ctx = pack_context(*unix_ts_ms, *random_a, *random_b);
     Ok(())
 }
 
