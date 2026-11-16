@@ -58,19 +58,23 @@ v7_gungraun_debug:
             exit 69
         fi
 
-        printf "not running on Linux, using Docker!"
+        printf "not running on Linux, using Docker!\n"
         ../benches/run_gungraun_v7.sh "$BENCH_SNIPPET"
     else
         # RUNNING ON LINUX
-        printf "running on Linux! Checking for dependencies..."
+        printf "running on Linux! Checking for dependencies...\n"
 
         # Check if gungraun-runner is installed
-        GUNGRAUN_RUNNER_VERSION=$(gungraun-runner --version 2>/dev/null)
-        if [[ -z "$GUNGRAUN_RUNNER_VERSION" ]]; then
+        if ! cargo install --list | grep -q '^gungraun-runner '; then
             printf "\033[31mERROR: gungraun-runner is required!\033[0m\n"
-            printf "\033[31mERROR: Please use\033[0m `cargo install --version 0.20.0 gungraun-runner` \033[31mto install it!\033[0m\n"
-        else
-          echo "Version: $version_output"
+            printf "\033[31mERROR: Please use\033[0m \`cargo install --version 0.20.0 gungraun-runner\` \033[31mto install it!\033[0m\n"
+            exit 67
+        fi
+        # Check if gungraun-runner is installed
+        if ! cargo install --list | grep -q '^gungraun-runner '; then
+            printf "\033[31mERROR: gungraun-runner is required!\033[0m\n"
+            printf "\033[31mERROR: Please use\033[0m \`cargo install --version 0.20.0 gungraun-runner\` \033[31mto install it!\033[0m\n"
+            exit 67
         fi
 
         eval "$BENCH_SNIPPET"
