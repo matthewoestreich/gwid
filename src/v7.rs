@@ -192,7 +192,7 @@ fn raw_uuid_from_parts(unix_ts_ms: u128, random_a: u16, random_b: u64) -> u128 {
 /// the sub-ms timestamp precision (random_a part), the last 62 bits are the entropy bits (randomb_b
 /// part).
 ///
-/// BIT LAYOUT DIAGRAM:
+/// BIT LAYOUT DIAGRAM FOR CONTEXT:
 /// [000000][000000000000000000000000000000000000000000000000][000000000000][00000000000000000000000000000000000000000000000000000000000000]
 /// [unused][<---------------- unix_ts_ms ------------------>][<-random_a->][<-------------------- radom_b ------------------------------->]
 ///
@@ -209,7 +209,7 @@ fn pack_context(ts: u128, a: u16, b: u64) -> u128 {
 /// the sub-ms timestamp precision (random_a part), the last 62 bits are the entropy bits (randomb_b
 /// part).
 ///
-/// BIT LAYOUT DIAGRAM:
+/// BIT LAYOUT DIAGRAM FOR CONTEXT:
 /// [000000][000000000000000000000000000000000000000000000000][000000000000][00000000000000000000000000000000000000000000000000000000000000]
 /// [unused][<---------------- unix_ts_ms ------------------>][<-random_a->][<-------------------- radom_b ------------------------------->]
 ///
