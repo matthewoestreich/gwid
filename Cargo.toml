@@ -36,6 +36,7 @@ harness = false
 [profile.bench-debug]
 inherits = "bench"
 debug = true
+strip = false
 
 [features]
 v7-crypto-rand = []

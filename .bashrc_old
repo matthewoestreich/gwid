@@ -1,8 +1,0 @@
-
-# tabtab source for electron-forge package
-# uninstall by removing these lines or running `tabtab uninstall electron-forge`
-[ -f /Users/matthew/Documents/GitHub/_Electron/electron-timer/node_modules/tabtab/.completions/electron-forge.bash ] && . /Users/matthew/Documents/GitHub/_Electron/electron-timer/node_modules/tabtab/.completions/electron-forge.bash
-. "/Users/matthew/.deno/env"
-
-# Vite+ bin (https://viteplus.dev)
-. "/Users/matthew/.config/vite-plus/env"
