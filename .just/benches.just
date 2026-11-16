@@ -30,7 +30,7 @@ v7_gungraun:
 v7_gungraun_debug:
     #!/usr/bin/env bash
     # Docker either not installed or not running..
-    if [[ "$OSTYPE" != linux* ]]; then
+    if [[ "$OSTYPE" != "linux"* ]]; then
         if ! docker info >/dev/null 2>&1; then
             printf "\033[31mERROR: This benchmark requires Docker!\033[0m\n"
             printf "\033[31mERROR: Either Docker is not installed or Docker is not running!\033[0m\n"
