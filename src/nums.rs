@@ -77,38 +77,6 @@ impl MathRandom {
     }
 }
 
-#[cfg(test)]
-mod test {
-    use super::*;
-
-    #[test]
-    fn matches_chrome() {
-        let mut math = MathRandom::initialize(Some(1337));
-
-        // During startup Chrome seems to call Math.random 8 times, so we also need to call it 8 times.
-        for _ in 0..8 {
-            math.random_double();
-        }
-
-        let expected = [
-            0.1623809348128048,
-            0.803143096276664,
-            0.6202810541608373,
-            0.4509504712894983,
-            0.44412613159342396,
-            0.7323221103230801,
-            0.7364364137826004,
-            0.35209346258118945,
-            0.9414014356908873,
-            0.6226657071438221,
-        ];
-
-        let rands: [f64; 10] = std::array::from_fn(|_| math.random_double());
-
-        assert_eq!(expected, rands);
-    }
-}
-
 // https://source.chromium.org/chromium/_/chromium/v8/v8/+/main:src/base/utils/random-number-generator.h;drc=99f606174481f6e2f4809c4262122a30a25583af;bpv=0;bpt=0
 #[derive(Default, Debug)]
 pub struct RandomNumberGenerator {
@@ -172,5 +140,37 @@ impl RandomNumberGenerator {
         h = h.wrapping_mul(0xC4CEB9FE1A85EC53u64);
         h ^= h >> 33;
         h
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn matches_chrome() {
+        let mut math = MathRandom::initialize(Some(1337));
+
+        // During startup Chrome seems to call Math.random 8 times, so we also need to call it 8 times.
+        for _ in 0..8 {
+            math.random_double();
+        }
+
+        let expected = [
+            0.1623809348128048,
+            0.803143096276664,
+            0.6202810541608373,
+            0.4509504712894983,
+            0.44412613159342396,
+            0.7323221103230801,
+            0.7364364137826004,
+            0.35209346258118945,
+            0.9414014356908873,
+            0.6226657071438221,
+        ];
+
+        let rands: [f64; 10] = std::array::from_fn(|_| math.random_double());
+
+        assert_eq!(expected, rands);
     }
 }

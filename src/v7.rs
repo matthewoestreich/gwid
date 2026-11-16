@@ -121,7 +121,6 @@ pub fn uuid_to_parts(uuid: &str) -> Result<(u128, u16, u64), crate::GwidError> {
     let unix_ts_ms = (value >> TIMESTAMP_SHIFT) & TIMESTAMP_MAX as u128;
     let random_a = (value >> RANDOM_A_SHIFT) & RANDOM_A_MAX as u128;
     let random_b = value & RANDOM_B_MAX as u128;
-
     Ok((unix_ts_ms, random_a as u16, random_b as u64))
 }
 
@@ -186,12 +185,34 @@ fn raw_uuid_from_parts(unix_ts_ms: u128, random_a: u16, random_b: u64) -> u128 {
         | (random_b as u128)
 }
 
+/// This method packs values into a u128, it is meant to handle global/shared context updates.
+///
+/// Our context/state is a packed u128 where (starting from left going -> right) the first 6 bits are
+/// not used, aka all 0's. The next 48 bits are the timestamp (unix_ts_ms part), the next 12 bits are
+/// the sub-ms timestamp precision (random_a part), the last 62 bits are the entropy bits (randomb_b
+/// part).
+///
+/// BIT LAYOUT DIAGRAM:
+/// [000000][000000000000000000000000000000000000000000000000][000000000000][00000000000000000000000000000000000000000000000000000000000000]
+/// [unused][<---------------- unix_ts_ms ------------------>][<-random_a->][<-------------------- radom_b ------------------------------->]
+///
 fn pack_context(ts: u128, a: u16, b: u64) -> u128 {
     ((ts & TIMESTAMP_MAX as u128) << (RANDOM_A_BITS + RANDOM_B_BITS))
         | (((a & RANDOM_A_MAX) as u128) << RANDOM_B_BITS)
         | ((b & RANDOM_B_MAX) as u128)
 }
 
+/// This method unpacks values from a u128, it is meant to handle reading global/shared context updates.
+///
+/// Our context/state is a packed u128 where (starting from left going -> right) the first 6 bits are
+/// not used, aka all 0's. The next 48 bits are the timestamp (unix_ts_ms part), the next 12 bits are
+/// the sub-ms timestamp precision (random_a part), the last 62 bits are the entropy bits (randomb_b
+/// part).
+///
+/// BIT LAYOUT DIAGRAM:
+/// [000000][000000000000000000000000000000000000000000000000][000000000000][00000000000000000000000000000000000000000000000000000000000000]
+/// [unused][<---------------- unix_ts_ms ------------------>][<-random_a->][<-------------------- radom_b ------------------------------->]
+///
 fn unpack_context(value: u128) -> (u128, u16, u64) {
     let ts = value >> (RANDOM_A_BITS + RANDOM_B_BITS);
     let a = ((value >> RANDOM_B_BITS) & RANDOM_A_MAX as u128) as u16;
@@ -199,7 +220,8 @@ fn unpack_context(value: u128) -> (u128, u16, u64) {
     (ts, a, b)
 }
 
-/// - Only handles clock drift
+/// For use in non-strict monotonicity.
+///   - Only handles clock drift
 fn ensure_monotonicity(
     unix_ts_ms: u128,
     random_a: u16,
@@ -220,15 +242,15 @@ fn ensure_monotonicity(
     };
 
     *packed_ctx = pack_context(unix_ts_ms, random_a, random_b);
-
     (unix_ts_ms, random_a)
 }
 
-/// - Enforces nondecreasing time.
-/// - Only need monotonicity if timestamps were in same sub-ms precision,
-///   in which case, only `random_b` is incremented.
-/// - Handles overflow.
-/// - Updates context.
+/// For use in strict monotonicity.
+///   - Enforces nondecreasing time.
+///   - Only need monotonicity if timestamps were in same sub-ms precision,
+///     in which case, only `random_b` is incremented.
+///   - Handles overflow.
+///   - Updates context.
 fn ensure_strict_monotonicity(
     unix_ts_ms: u128,
     random_a: u16,
