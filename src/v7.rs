@@ -115,6 +115,33 @@ pub fn generate_strict_raw() -> Result<u128, UUIDv7Error> {
     generate_strict_raw_with(timestamp, random_b)
 }
 
+/// We return the UUID as a tuple with four elements. Each element represents a "word",
+/// which is equivalent to a row in the following diagram:
+///
+///  0                   1                   2                   3
+///  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+/// |                           unix_ts_ms                          |
+/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+/// |          unix_ts_ms           |  ver  |       rand_a          |
+/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+/// |var|                        rand_b                             |
+/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+/// |                            rand_b                             |
+/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+///
+/// Each row corresponds to it's index in the tuple, starting from the top.
+/// Eg; first row is `.0`, second row from top is `.1`....
+pub fn uuid_to_fields(uuid: &str) -> Result<(u32, u32, u32, u32), crate::GwidError> {
+    let value = crate::decode(uuid)?;
+    Ok((
+        (value >> 96) as u32,
+        (value >> 64) as u32,
+        (value >> 32) as u32,
+        value as u32,
+    ))
+}
+
 /// Returns tuple of parts where each element is: (unix_ts_ms, random_a, random_b)
 pub fn uuid_to_parts(uuid: &str) -> Result<(u128, u16, u64), crate::GwidError> {
     let value = crate::decode(uuid)?;
@@ -386,6 +413,17 @@ mod test {
     #[test]
     fn it_works() {
         let _uuid = crate::v7::generate_strict().unwrap();
+    }
+
+    #[test]
+    fn foo() {
+        let uuid = generate().unwrap();
+        println!("{uuid}\n");
+        let (first, second, third, fourth) = uuid_to_fields(&uuid).unwrap();
+        println!("{first}");
+        println!("{second}");
+        println!("{third}");
+        println!("{fourth}");
     }
 
     #[test]
