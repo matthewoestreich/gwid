@@ -187,15 +187,18 @@ fn raw_uuid_from_parts(unix_ts_ms: u128, random_a: u16, random_b: u64) -> u128 {
 
 /// This method packs values into a u128, it is meant to handle global/shared context updates.
 ///
-/// Our context/state is a packed u128 where (starting from left going -> right) the first 6 bits are
-/// not used, aka all 0's. The next 48 bits are the timestamp (unix_ts_ms part), the next 12 bits are
-/// the sub-ms timestamp precision (random_a part), the last 62 bits are the entropy bits (randomb_b
-/// part).
+/// Our context/state is a packed u128 where (starting from left going -> right):
 ///
-/// BIT LAYOUT DIAGRAM FOR CONTEXT:
+/// | Bit Count | Bit Range | Field      | Purpose                             |
+/// | --------- | --------- | ---------- | ----------------------------------- |
+/// | 6 bits    | 0-5       | <empty>    | No use                              |
+/// | 48 bits   | 6-53      | unix-ts-ms | Unix timestamp                      |
+/// | 12 bits   | 54-65     | random_a   | Sub-millisecond timestmap precision |
+/// | 62 bits   | 66-127    | random_b   | Entropy                             |
+///
+/// BIT LAYOUT:
 /// [000000][000000000000000000000000000000000000000000000000][000000000000][00000000000000000000000000000000000000000000000000000000000000]
 /// [unused][<---------------- unix_ts_ms ------------------>][<-random_a->][<-------------------- radom_b ------------------------------->]
-///
 fn pack_context(ts: u128, a: u16, b: u64) -> u128 {
     ((ts & TIMESTAMP_MAX as u128) << (RANDOM_A_BITS + RANDOM_B_BITS))
         | (((a & RANDOM_A_MAX) as u128) << RANDOM_B_BITS)
@@ -204,15 +207,18 @@ fn pack_context(ts: u128, a: u16, b: u64) -> u128 {
 
 /// This method unpacks values from a u128, it is meant to handle reading global/shared context updates.
 ///
-/// Our context/state is a packed u128 where (starting from left going -> right) the first 6 bits are
-/// not used, aka all 0's. The next 48 bits are the timestamp (unix_ts_ms part), the next 12 bits are
-/// the sub-ms timestamp precision (random_a part), the last 62 bits are the entropy bits (randomb_b
-/// part).
+/// Our context/state is a packed u128 where (starting from left going -> right):
 ///
-/// BIT LAYOUT DIAGRAM FOR CONTEXT:
+/// | Bit Count | Bit Range | Field      | Purpose                             |
+/// | --------- | --------- | ---------- | ----------------------------------- |
+/// | 6 bits    | 0-5       | <empty>    | No use                              |
+/// | 48 bits   | 6-53      | unix-ts-ms | Unix timestamp                      |
+/// | 12 bits   | 54-65     | random_a   | Sub-millisecond timestmap precision |
+/// | 62 bits   | 66-127    | random_b   | Entropy                             |
+///
+/// BIT LAYOUT:
 /// [000000][000000000000000000000000000000000000000000000000][000000000000][00000000000000000000000000000000000000000000000000000000000000]
 /// [unused][<---------------- unix_ts_ms ------------------>][<-random_a->][<-------------------- radom_b ------------------------------->]
-///
 fn unpack_context(value: u128) -> (u128, u16, u64) {
     let ts = value >> (RANDOM_A_BITS + RANDOM_B_BITS);
     let a = ((value >> RANDOM_B_BITS) & RANDOM_A_MAX as u128) as u16;
