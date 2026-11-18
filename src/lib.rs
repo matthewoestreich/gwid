@@ -152,8 +152,11 @@
 //! [RFC 9562](https://www.rfc-editor.org/rfc/rfc9562/) does not require UUIDv7 random bits to be cryptographically secure, but we give you the option.
 
 pub mod error;
+pub mod v1;
 pub mod v4;
 pub mod v7;
+
+mod timestamp;
 
 pub(crate) mod nums;
 
@@ -247,6 +250,12 @@ pub(crate) fn print_bits<T: std::fmt::Binary>(value: T) {
 #[cfg(test)]
 mod lib_test {
     use super::*;
+
+    #[test]
+    fn uuid_foo() {
+        println!("from_uuid = {}", uuid::Uuid::now_v7());
+        println!("from_this = {}", crate::v7::generate().unwrap());
+    }
 
     #[test]
     fn encode_raw_uuid() {

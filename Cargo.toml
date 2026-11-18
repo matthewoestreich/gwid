@@ -19,7 +19,7 @@ rand = "0.10.3"
 [dev-dependencies.uuid]
 version = "1.29.2"
 # Lets you generate random UUIDs
-features = ["v4", "v7"]
+features = ["v1", "v6", "v4", "v7"]
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies.gungraun]
 version = "0.20"
