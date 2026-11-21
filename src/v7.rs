@@ -37,7 +37,6 @@ use crate::VERSION_SHIFT;
 use crate::builder;
 #[cfg(not(feature = "v7-crypto-rand"))]
 use crate::nums::MathRandom;
-use crate::rng::RandomProvider as _;
 use rand::RngExt;
 use rand::rngs::ThreadRng;
 use std::cell::Cell;
@@ -81,7 +80,7 @@ impl From<builder::Version7> for Uuid {
         let random_bits: u128 = if value.crypto {
             rand::rng().random()
         } else {
-            crate::nums::rand::random()
+            crate::rand::random()
         };
 
         todo!()

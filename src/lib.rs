@@ -159,7 +159,7 @@ pub mod v4;
 pub mod v7;
 
 pub(crate) mod nums;
-pub(crate) mod rng;
+pub(crate) mod rand;
 
 use crate::error::GwidError;
 
