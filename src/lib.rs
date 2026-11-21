@@ -151,14 +151,15 @@
 //!
 //! [RFC 9562](https://www.rfc-editor.org/rfc/rfc9562/) does not require UUIDv7 random bits to be cryptographically secure, but we give you the option.
 
+pub mod builder;
 pub mod error;
+pub mod timestamp;
 pub mod v1;
 pub mod v4;
 pub mod v7;
 
-mod timestamp;
-
 pub(crate) mod nums;
+pub(crate) mod rng;
 
 use crate::error::GwidError;
 
@@ -168,16 +169,16 @@ pub type Bytes = [u8; UUID_BYTES];
 
 #[derive(Clone, Copy, Eq, Ord, PartialEq, PartialOrd)]
 #[repr(transparent)]
-pub struct Gwid(Bytes);
+pub struct Uuid(Bytes);
 
-impl Gwid {
+impl Uuid {
     pub const fn zero() -> Self {
-        Gwid::from_bytes([0; UUID_BYTES])
+        Uuid::from_bytes([0; UUID_BYTES])
     }
 
     /// So we can use const fns for Gwid::zero() etc
     pub const fn from_bytes(bytes: Bytes) -> Self {
-        Gwid(bytes)
+        Uuid(bytes)
     }
 
     pub const fn as_bytes(&self) -> &Bytes {
@@ -189,9 +190,9 @@ impl Gwid {
     }
 }
 
-impl From<Bytes> for Gwid {
+impl From<Bytes> for Uuid {
     fn from(bytes: Bytes) -> Self {
-        Gwid(bytes)
+        Uuid(bytes)
     }
 }
 
@@ -251,11 +252,11 @@ pub(crate) fn print_bits<T: std::fmt::Binary>(value: T) {
 mod lib_test {
     use super::*;
 
-    #[test]
-    fn uuid_foo() {
-        println!("from_uuid = {}", uuid::Uuid::now_v7());
-        println!("from_this = {}", crate::v7::generate().unwrap());
-    }
+    // #[test]
+    // fn uuid_foo() {
+    //     println!("from_uuid = {}", uuid::Uuid::now_v7());
+    //     println!("from_this = {}", crate::v7::generate().unwrap());
+    // }
 
     #[test]
     fn encode_raw_uuid() {

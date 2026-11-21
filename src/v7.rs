@@ -31,50 +31,33 @@
 
 use crate::CLEAR_VARIANT_MASK;
 use crate::CLEAR_VERSION_MASK;
+use crate::Uuid;
 use crate::VARIANT_SHIFT;
 use crate::VERSION_SHIFT;
+use crate::builder;
 #[cfg(not(feature = "v7-crypto-rand"))]
 use crate::nums::MathRandom;
+use crate::rng::RandomProvider as _;
 use rand::RngExt;
-#[cfg(feature = "v7-crypto-rand")]
 use rand::rngs::ThreadRng;
+use std::cell::Cell;
 use std::cell::RefCell;
 use std::error;
 use std::fmt::Display;
 use std::fmt::Formatter;
 use std::fmt::Result as FmtResult;
-#[cfg(feature = "v7-global-monotonicity")]
 use std::sync::LazyLock;
-#[cfg(feature = "v7-global-monotonicity")]
 use std::sync::Mutex;
 use std::time::Duration;
 use std::time::SystemTime;
 use std::time::SystemTimeError;
 use std::time::UNIX_EPOCH;
 
-// Used by `generate()` to maintain thread-local timestamp monotonicity.
-// Global synchronization is unnecessary because monotonicity across threads
-// and within the same sub-millisecond bucket is not guaranteed.
 thread_local! {
     static CONTEXT: RefCell<u128> = const { RefCell::new(0) };
 }
 
-// Thread local RNG. Underlying source depends upon feature flag.
-thread_local! {
-    static RNG: RefCell<EntropySource> = RefCell::new(EntropySource::new())
-}
-
-// Used by `generate_strict()` to maintain strict global monotonicity.
-// Uses a mutex to synchronize UUID generation across threads.
-#[cfg(feature = "v7-global-monotonicity")]
 static STRICT_CONTEXT: LazyLock<Mutex<u128>> = LazyLock::new(|| Mutex::new(0));
-
-// Used by `generate_strict()` to maintain strict thread-local monotonicity.
-// No synchronization between threads is necessary.
-#[cfg(not(feature = "v7-global-monotonicity"))]
-thread_local! {
-    static STRICT_CONTEXT: RefCell<u128> =  const { RefCell::new(0) };
-}
 
 const RANDOM_A_BITS: u8 = 12;
 const RANDOM_B_BITS: u8 = 62;
@@ -91,6 +74,23 @@ const RANDOM_A_SHIFT: u128 = 64;
 const VERSION: u8 = 7; // 0b111
 const VARIANT: u8 = 2; // 0b10
 
+impl From<builder::Version7> for Uuid {
+    fn from(value: builder::Version7) -> Self {
+        let additional_bits = if value.additional_precision { 12 } else { 0 };
+
+        let random_bits: u128 = if value.crypto {
+            rand::rng().random()
+        } else {
+            crate::nums::rand::random()
+        };
+
+        todo!()
+    }
+}
+
+// ----------------- OLD ------------------------------------------------------------------------
+
+/*
 pub fn generate() -> Result<String, UUIDv7Error> {
     let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?;
     let random_b = RNG.with_borrow_mut(|entropy_source| entropy_source.random());
@@ -132,7 +132,7 @@ pub fn generate_strict_raw() -> Result<u128, UUIDv7Error> {
 ///
 /// Each row corresponds to it's index in the tuple, starting from the top.
 /// Eg; first row is `.0`, second row from top is `.1`....
-pub fn uuid_to_fields(uuid: &str) -> Result<(u32, u32, u32, u32), crate::GwidError> {
+pub fn uuid_to_words(uuid: &str) -> Result<(u32, u32, u32, u32), crate::GwidError> {
     let value = crate::decode(uuid)?;
     Ok((
         (value >> 96) as u32,
@@ -156,8 +156,7 @@ fn generate_raw_with(timestamp: Duration, random_b: u64) -> u128 {
     let random_a = derive_random_a(timestamp) & RANDOM_A_MAX;
     let random_b = random_b & RANDOM_B_MAX;
 
-    let (unix_ts_ms, random_a) =
-        CONTEXT.with_borrow_mut(|ctx| ensure_monotonicity(unix_ts_ms, random_a, random_b, ctx));
+    CONTEXT.with_borrow_mut(|ctx| ensure_monotonicity(unix_ts_ms, random_a, random_b, ctx));
 
     raw_uuid_from_parts(unix_ts_ms, random_a, random_b)
 }
@@ -181,7 +180,7 @@ fn generate_strict_raw_with(timestamp: Duration, random_b: u64) -> Result<u128, 
     };
 
     #[cfg(not(feature = "v7-global-monotonicity"))]
-    let (unix_ts_ms, random_a, random_b) = STRICT_CONTEXT
+    let (unix_ts_ms, random_a, random_b) = CONTEXT
         .with_borrow_mut(|ctx| ensure_strict_monotonicity(unix_ts_ms, random_a, random_b, ctx))?;
 
     Ok(raw_uuid_from_parts(unix_ts_ms, random_a, random_b))
@@ -366,26 +365,14 @@ impl error::Error for UUIDv7Error {
     }
 }
 
-#[cfg(not(feature = "v7-crypto-rand"))]
-trait RandomProvider {
-    fn random(&mut self) -> u64;
-}
-
-#[cfg(not(feature = "v7-crypto-rand"))]
-impl RandomProvider for MathRandom {
-    fn random(&mut self) -> u64 {
-        self.random_u64()
-    }
-}
-
-struct EntropySource {
+struct EntropySourceOld {
     #[cfg(not(feature = "v7-crypto-rand"))]
     rng: MathRandom,
     #[cfg(feature = "v7-crypto-rand")]
     rng: ThreadRng,
 }
 
-impl EntropySource {
+impl EntropySourceOld {
     #[rustfmt::skip]
     pub fn new() -> Self {
         #[cfg(not(feature = "v7-crypto-rand"))]
@@ -410,20 +397,72 @@ mod test {
         thread,
     };
 
+    fn get_timestamp(raw_uuid: u128) -> u64 {
+        (raw_uuid >> 80_u128) as u64
+    }
+
     #[test]
     fn it_works() {
         let _uuid = crate::v7::generate_strict().unwrap();
     }
 
     #[test]
-    fn foo() {
-        let uuid = generate().unwrap();
-        println!("{uuid}\n");
-        let (first, second, third, fourth) = uuid_to_fields(&uuid).unwrap();
-        println!("{first}");
-        println!("{second}");
-        println!("{third}");
-        println!("{fourth}");
+    fn v7_foo() {
+        let mut handles = Vec::with_capacity(10);
+        let num_loops = 1_000_000;
+
+        for h in 0..10 {
+            let handle = thread::spawn(move || {
+                for i in 0..num_loops {
+                    if i % (num_loops / 4) == 0 {
+                        println!("thread {h} is at {i}");
+                    }
+                    let mut prev_relaxed: u128 = 0;
+                    for _ in 0..10 {
+                        let relaxed = crate::v7::generate_raw().unwrap();
+                        // println!("{}", crate::encode(relaxed));
+                        let relaxed_ts = get_timestamp(relaxed);
+                        let prev_relaxed_ts = get_timestamp(prev_relaxed);
+                        assert!(
+                            // IMPORTANT!! WE NEED TO USE <= BC THIS IS NOT STRICT GENERATION!
+                            prev_relaxed_ts <= relaxed_ts,
+                            "expected prev_relaxed ({prev_relaxed} | {prev_relaxed_ts}) to be less than or equal to relaxed ({relaxed} | {relaxed_ts})"
+                        );
+                        prev_relaxed = relaxed;
+                    }
+
+                    let relaxed = crate::v7::generate_raw().unwrap();
+                    let strict = crate::v7::generate_strict_raw().unwrap();
+
+                    // println!("{}", crate::encode(relaxed));
+                    // println!("{}", crate::encode(strict));
+
+                    assert!(
+                        relaxed < strict,
+                        "expected relaxed ({relaxed}) to still be less than strict ({strict})"
+                    );
+
+                    let mut prev_strict = strict;
+                    for _ in 0..10 {
+                        let sub_strict = crate::v7::generate_strict_raw().unwrap();
+                        // println!("{}", crate::encode(sub_strict));
+                        assert!(
+                            prev_strict < sub_strict,
+                            "expected prev_strict ({prev_strict}) to be less than sub_strict ({sub_strict})"
+                        );
+                        prev_strict = sub_strict;
+                    }
+
+                    // println!();
+                }
+            });
+
+            handles.push(handle);
+        }
+
+        for handle in handles {
+            _ = handle.join().unwrap();
+        }
     }
 
     #[test]
@@ -984,3 +1023,4 @@ mod strict_global_monotonicity {
         );
     }
 }
+*/

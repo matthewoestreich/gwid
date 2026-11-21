@@ -1,12 +1,15 @@
-use crate::{CLEAR_VARIANT_MASK, CLEAR_VERSION_MASK, VARIANT_SHIFT, VERSION_SHIFT, print_bits};
+use crate::CLEAR_VARIANT_MASK;
+use crate::CLEAR_VERSION_MASK;
+use crate::VARIANT_SHIFT;
+use crate::VERSION_SHIFT;
+use crate::print_bits;
 use rand::RngExt as _;
-use std::{
-    cell::{Cell, RefCell},
-    sync::atomic::AtomicU16,
-};
+use std::cell::Cell;
+use std::cell::RefCell;
+use std::sync::atomic::AtomicU16;
 
 thread_local! {
-    static V1_CONTEXT: RefCell<AtomicU16> = RefCell::new(AtomicU16::new(rand::rng().random())) ;
+    static CONTEXT: RefCell<AtomicU16> = RefCell::new(AtomicU16::new(rand::rng().random())) ;
 }
 
 const TIMESTAMP_BITS: u64 = 60;
@@ -25,7 +28,7 @@ const VARIANT: u8 = 2;
 pub fn generate_raw() -> u128 {
     let ts = crate::timestamp::gregorian_now();
     let clock_seq =
-        V1_CONTEXT.with_borrow_mut(|x| x.fetch_add(1, std::sync::atomic::Ordering::AcqRel));
+        CONTEXT.with_borrow_mut(|x| x.fetch_add(1, std::sync::atomic::Ordering::AcqRel));
     let node = rand::rng().random();
     generate_raw_with(ts, clock_seq, node)
 }
@@ -39,34 +42,14 @@ fn generate_raw_with(gregorian_timestamp: u128, clock_seq: u16, node: u64) -> u1
     // print_bits(mid as u64);
     // print_bits(hi as u64);
 
-    let mut o = 0u128;
-
-    o |= (low as u128) << 96;
-    // println!("output after shifting in low");
-    // print_bits(o);
-    o |= (mid as u128) << 80;
-    // println!("output after shifting in mid");
-    // print_bits(o);
-    o |= (VERSION as u128) << VERSION_SHIFT;
-    // println!("output after shifting in version");
-    // print_bits(o);
-    o |= (hi as u128) << 64;
-    // println!("output after shifting in hi");
-    // print_bits(o);
-    o |= (VARIANT as u128) << VARIANT_SHIFT;
-    // println!("output after shifting in variant");
-    // print_bits(o);
-    o |= (clock_seq as u128) << 48;
-    // println!("output after shifting in clock sequence");
-    // print_bits(o);
-    o |= (node & NODE_MASK) as u128;
-    // println!("output after shifting in node");
-    // print_bits(o);
-
-    o
+    (low as u128) << 96
+        | (mid as u128) << 80
+        | (VERSION as u128) << VERSION_SHIFT
+        | (hi as u128) << 64
+        | (VARIANT as u128) << VARIANT_SHIFT
+        | (clock_seq as u128) << 48
+        | (node & NODE_MASK) as u128
 }
-
-// 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
 
 fn timestamp_to_masked_parts(gregorian_timestamp: u64) -> (u32, u16, u16) {
     (
