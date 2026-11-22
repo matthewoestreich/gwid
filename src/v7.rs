@@ -56,7 +56,7 @@ thread_local! {
     static CONTEXT: RefCell<u128> = const { RefCell::new(0) };
 }
 
-static STRICT_CONTEXT: LazyLock<Mutex<u128>> = LazyLock::new(|| Mutex::new(0));
+static CONTEXT_GLOBAL: LazyLock<Mutex<u128>> = LazyLock::new(|| Mutex::new(0));
 
 const RANDOM_A_BITS: u8 = 12;
 const RANDOM_B_BITS: u8 = 62;
@@ -85,48 +85,56 @@ impl From<builder::Version7> for Uuid {
             crate::rand::random()
         };
 
-        let strict_ctx = match options.strict {
-            true => Some(STRICT_CONTEXT.lock().unwrap_or_else(|p| p.into_inner())),
-            false => None,
-        };
-        let (prev_unix_ts_ms, prev_random) = match strict_ctx {
-            Some(ctx) => unpack_context(*ctx),
-            None => CONTEXT.with_borrow_mut(|ctx| unpack_context(*ctx)),
-        };
-
-        // Pretend work was done here...
-
-        // How to update CONTEXT or STRICT_CONTEXT
-
         let (curr_secs, curr_subsec_nanos) = options.timestamp.to_seconds_and_subsec_nanos();
 
-        use crate::print_bits;
-        print_bits(prev_unix_ts_ms, "previous unix ts ms");
-        print_bits(curr_secs, "curr seconds");
+        if options.global {
+            let mut ctx = CONTEXT_GLOBAL.lock().unwrap_or_else(|p| p.into_inner());
+            todo!()
+        } else {
+            CONTEXT.with_borrow_mut(|ctx| {
+                let (prev_secs, prev_random) = unpack_context(*ctx);
+                let is_same_ms = prev_secs == curr_secs;
+                if is_same_ms {
+                    if options.strict {}
+                } else {
+                    // msb is now higher than last time.
+                    // we can grab new rand bits..
+                    let new_random = get_entropy(options.crypto) & RANDOM_BITS_MAX;
+                }
+                todo!();
+            });
+        }
 
         Uuid(0_u128.to_be_bytes())
     }
 }
 
+fn get_entropy(is_crypto: bool) -> u128 {
+    if is_crypto {
+        rand::rng().random()
+    } else {
+        crate::rand::random()
+    }
+}
+
 /// We only  need 48 bits from 'ts' and 74 bits from 'counter'
+///
+/// BIT LAYOUT:
+/// [unused][<----------- unix_ts_ms ---------->][<- 12 bits >][<---------- 30 bits --------->][ <---------- 32 bits ---------->]
+/// [000000000000000000000000000000000000000000[000000000000][000000000000000000000000000000][00000000000000000000000000000000]
+/// [unused][<---------------- unix_ts_ms -------[<    |     >][<--------- counter ---------->][ <---------- random ----------->]
+///                                              [<    +-- counter or additional sub-ms precision >]
 fn pack_context(ts: u64, counter: u128) -> u128 {
     (((ts & TIMESTAMP_MAX) as u128) << RANDOM_BITS) | counter & RANDOM_BITS_MAX
-    // ((ts & TIMESTAMP_MAX as u128) << (RANDOM_A_BITS + RANDOM_B_BITS))
-    //     | (((a & RANDOM_A_MAX) as u128) << RANDOM_B_BITS)
-    //     | ((b & RANDOM_B_MAX) as u128)
 }
 
 /// BIT LAYOUT:
 /// [000000][000000000000000000000000000000000000000000000000][00000000000000000000000000000000000000000000000000000000000000000000000000]
 /// [unused][<---------------- unix_ts_ms ------------------>][<---------------------------- counter ----------------------------------->]
 fn unpack_context(value: u128) -> (u64, u128) {
-    let r = value & RANDOM_BITS_MAX;
-    let ts = (value >> RANDOM_BITS) as u64;
-    (ts, r)
-    // let ts = value >> (RANDOM_A_BITS + RANDOM_B_BITS);
-    // let a = ((value >> RANDOM_B_BITS) & RANDOM_A_MAX as u128) as u16;
-    // let b = (value & RANDOM_B_MAX as u128) as u64;
-    // (ts, a, b)
+    let random = value & RANDOM_BITS_MAX;
+    let unix_ts_ms = (value >> RANDOM_BITS) as u64;
+    (unix_ts_ms, random)
 }
 
 #[cfg(test)]

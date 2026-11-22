@@ -16,6 +16,7 @@ pub struct Version7 {
     pub(crate) additional_precision: bool,
     pub(crate) crypto: bool,
     pub(crate) timestamp: UnixTimestamp,
+    pub(crate) global: bool,
 }
 
 pub struct UuidBuilder<T>(T);
@@ -51,6 +52,7 @@ impl UuidBuilder<Version7> {
             additional_precision: false,
             crypto: false,
             timestamp: UnixTimestamp::now(),
+            global: false,
         })
     }
 
@@ -71,6 +73,12 @@ impl UuidBuilder<Version7> {
     /// The UUID Version 7 RFC does not require sub-millisecond monotonicity.
     pub fn strict(mut self) -> Self {
         self.0.strict = true;
+        self
+    }
+
+    /// Process-wide global monotonicity.
+    pub fn global(mut self) -> Self {
+        self.0.global = true;
         self
     }
 
