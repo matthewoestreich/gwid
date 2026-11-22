@@ -51,21 +51,21 @@ impl UnixTimestamp {
         Self(unix_nanos)
     }
 
-    /// Fallible version of `from(SystemTime)`.
+    /// Fallible version of `<UnixTimestamp>.from(<SystemTime>)`.
     pub fn try_from_system_time(system_time: SystemTime) -> Result<Self, GwidError> {
         let unix_nanos = system_time.duration_since(UNIX_EPOCH)?.as_nanos();
         Ok(Self(unix_nanos))
     }
 
-    /// Converts the timestamp back into a `std::time::SystemTime`.
-    pub fn to_system_time(&self) -> SystemTime {
-        let (seconds, subsec_nanos) = Timestamp::ns_to_secs_and_subsec_nanos(self.0);
-        UNIX_EPOCH + Duration::new(seconds, subsec_nanos)
+    /// Timestamp to seconds and subsec_nanos.
+    pub fn to_seconds_and_subsec_nanos(&self) -> (u64, u32) {
+        Timestamp::ns_to_secs_and_subsec_nanos(self.0)
     }
+}
 
-    /// Get current unix nanoseconds
-    pub const fn time(&self) -> u128 {
-        self.0
+impl From<UnixTimestamp> for SystemTime {
+    fn from(unix_timestamp: UnixTimestamp) -> Self {
+        unix_timestamp.into()
     }
 }
 
@@ -83,12 +83,6 @@ impl From<SystemTime> for UnixTimestamp {
             .as_nanos();
 
         Self(unix_nanos)
-    }
-}
-
-impl From<UnixTimestamp> for SystemTime {
-    fn from(unix_timestamp: UnixTimestamp) -> Self {
-        unix_timestamp.to_system_time()
     }
 }
 

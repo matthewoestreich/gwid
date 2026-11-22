@@ -158,7 +158,6 @@ pub mod v1;
 pub mod v4;
 pub mod v7;
 
-pub(crate) mod nums;
 pub(crate) mod rand;
 
 use crate::error::GwidError;
@@ -236,7 +235,10 @@ pub(crate) const VARIANT_SHIFT: u128 = 62;
 
 // Helper function to print bits
 #[allow(dead_code)]
-pub(crate) fn print_bits<T: std::fmt::Binary>(value: T) {
+pub(crate) fn print_bits<T: std::fmt::Binary>(value: T, message: &str) {
+    if !message.is_empty() {
+        println!("{message}");
+    }
     let width = std::mem::size_of::<T>() * 8;
     let bits = format!("{value:0width$b}");
     for (i, byte) in bits.as_bytes().chunks(8).enumerate() {

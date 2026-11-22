@@ -18,9 +18,9 @@ pub struct Version7 {
     pub(crate) timestamp: UnixTimestamp,
 }
 
-pub struct Gwid<T>(T);
+pub struct UuidBuilder<T>(T);
 
-impl Gwid<Version1> {
+impl UuidBuilder<Version1> {
     pub fn version1() -> Self {
         Self(Version1 {
             something: String::new(),
@@ -33,7 +33,7 @@ impl Gwid<Version1> {
     }
 }
 
-impl Gwid<Version4> {
+impl UuidBuilder<Version4> {
     pub fn version4() -> Self {
         Self(Version4 { something: 0 })
     }
@@ -44,7 +44,7 @@ impl Gwid<Version4> {
     }
 }
 
-impl Gwid<Version7> {
+impl UuidBuilder<Version7> {
     pub fn version7() -> Self {
         Self(Version7 {
             strict: false,
@@ -81,8 +81,6 @@ impl Gwid<Version7> {
     }
 
     pub fn build(self) -> Uuid {
-        // let pretend_built = [0_u8; UUID_BYTES];
-        // Uuid(pretend_built)
         Uuid::from(self.0)
     }
 }
@@ -93,14 +91,19 @@ mod test {
 
     #[test]
     fn builder_foo() {
-        let v7 = Gwid::version7()
+        let v7 = UuidBuilder::version7()
             .crypto()
             .strict()
             .additional_precision()
             .build();
 
-        let x = Gwid::version7();
+        let v7 = UuidBuilder::version7()
+            .crypto()
+            .strict()
+            .additional_precision()
+            .build();
 
-        let v1 = Gwid::<Version1>::version1().something(String::new());
+        // let x = UuidBuilder::version7();
+        // let v1 = UuidBuilder::<Version1>::version1().something(String::new());
     }
 }

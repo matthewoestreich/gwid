@@ -36,7 +36,7 @@ use crate::VARIANT_SHIFT;
 use crate::VERSION_SHIFT;
 use crate::builder;
 #[cfg(not(feature = "v7-crypto-rand"))]
-use crate::nums::MathRandom;
+use crate::rand::MathRandom;
 use rand::RngExt;
 use rand::rngs::ThreadRng;
 use std::cell::Cell;
@@ -61,6 +61,7 @@ static STRICT_CONTEXT: LazyLock<Mutex<u128>> = LazyLock::new(|| Mutex::new(0));
 const RANDOM_A_BITS: u8 = 12;
 const RANDOM_B_BITS: u8 = 62;
 const TIMESTAMP_BITS: u8 = 48;
+const RANDOM_BITS: u8 = 74;
 const RANDOM_A_TOTAL_VALUES: u16 = 1 << RANDOM_A_BITS;
 /// 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000111111111111
 const RANDOM_A_MAX: u16 = RANDOM_A_TOTAL_VALUES - 1;
@@ -68,22 +69,88 @@ const RANDOM_A_MAX: u16 = RANDOM_A_TOTAL_VALUES - 1;
 const RANDOM_B_MAX: u64 = (1 << RANDOM_B_BITS) - 1;
 /// 00000000000000000000000000000000000000000000000000000000000000000000000000000000111111111111111111111111111111111111111111111111
 const TIMESTAMP_MAX: u64 = (1 << TIMESTAMP_BITS) - 1;
+const RANDOM_BITS_MAX: u128 = (1 << RANDOM_BITS) - 1;
 const TIMESTAMP_SHIFT: u8 = 80;
 const RANDOM_A_SHIFT: u128 = 64;
 const VERSION: u8 = 7; // 0b111
 const VARIANT: u8 = 2; // 0b10
 
 impl From<builder::Version7> for Uuid {
-    fn from(value: builder::Version7) -> Self {
-        let additional_bits = if value.additional_precision { 12 } else { 0 };
+    fn from(options: builder::Version7) -> Self {
+        let additional_bits = if options.additional_precision { 12 } else { 0 };
 
-        let random_bits: u128 = if value.crypto {
+        let entropy: u128 = if options.crypto {
             rand::rng().random()
         } else {
             crate::rand::random()
         };
 
-        todo!()
+        let strict_ctx = match options.strict {
+            true => Some(STRICT_CONTEXT.lock().unwrap_or_else(|p| p.into_inner())),
+            false => None,
+        };
+        let (prev_unix_ts_ms, prev_random) = match strict_ctx {
+            Some(ctx) => unpack_context(*ctx),
+            None => CONTEXT.with_borrow_mut(|ctx| unpack_context(*ctx)),
+        };
+
+        // Pretend work was done here...
+
+        // How to update CONTEXT or STRICT_CONTEXT
+
+        let (curr_secs, curr_subsec_nanos) = options.timestamp.to_seconds_and_subsec_nanos();
+
+        use crate::print_bits;
+        print_bits(prev_unix_ts_ms, "previous unix ts ms");
+        print_bits(curr_secs, "curr seconds");
+
+        Uuid(0_u128.to_be_bytes())
+    }
+}
+
+/// We only  need 48 bits from 'ts' and 74 bits from 'counter'
+fn pack_context(ts: u64, counter: u128) -> u128 {
+    (((ts & TIMESTAMP_MAX) as u128) << RANDOM_BITS) | counter & RANDOM_BITS_MAX
+    // ((ts & TIMESTAMP_MAX as u128) << (RANDOM_A_BITS + RANDOM_B_BITS))
+    //     | (((a & RANDOM_A_MAX) as u128) << RANDOM_B_BITS)
+    //     | ((b & RANDOM_B_MAX) as u128)
+}
+
+/// BIT LAYOUT:
+/// [000000][000000000000000000000000000000000000000000000000][00000000000000000000000000000000000000000000000000000000000000000000000000]
+/// [unused][<---------------- unix_ts_ms ------------------>][<---------------------------- counter ----------------------------------->]
+fn unpack_context(value: u128) -> (u64, u128) {
+    let r = value & RANDOM_BITS_MAX;
+    let ts = (value >> RANDOM_BITS) as u64;
+    (ts, r)
+    // let ts = value >> (RANDOM_A_BITS + RANDOM_B_BITS);
+    // let a = ((value >> RANDOM_B_BITS) & RANDOM_A_MAX as u128) as u16;
+    // let b = (value & RANDOM_B_MAX as u128) as u64;
+    // (ts, a, b)
+}
+
+#[cfg(test)]
+mod test {
+    use crate::print_bits;
+
+    use super::*;
+
+    #[test]
+    fn v7_boof() {
+        let og_ts: u64 = 1795309761 & TIMESTAMP_MAX;
+        let og_rand: u128 = ::rand::random::<u128>() & RANDOM_BITS_MAX;
+        print_bits(og_ts, &format!("og_ts = {og_ts}"));
+        print_bits(og_rand, &format!("og_rand = {og_rand}"));
+
+        let packed = pack_context(og_ts, og_rand);
+        print_bits(packed, "packed");
+
+        let (unp_ts, unp_rand) = unpack_context(packed);
+        print_bits(unp_ts, &format!("unpacked_ts = {unp_ts}"));
+        print_bits(unp_rand, &format!("unpacked_rand = {unp_rand}"));
+
+        assert!(og_ts == unp_ts, "ts mismatch");
+        assert!(og_rand == unp_rand, "rand mismatch");
     }
 }
 
