@@ -187,6 +187,10 @@ impl Uuid {
     pub fn as_u128(&self) -> u128 {
         u128::from_be_bytes(self.0)
     }
+
+    pub fn as_hex(&self) -> String {
+        crate::encode(self.as_u128())
+    }
 }
 
 impl From<Bytes> for Uuid {

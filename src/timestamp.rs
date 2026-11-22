@@ -15,9 +15,20 @@ const GREGORIAN_TO_UNIX_OFFSET_IN_100_NANOSECOND_TICKS: u64 = 122_192_928_000_00
 const SIXTY_BITS_MASK: u64 = (1 << 60) - 1;
 
 /// Already accounts for UNIX_EPOCH.
+#[derive(Debug, Default, Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
 pub struct UnixTimestamp(pub(crate) u128);
 
 impl UnixTimestamp {
+    /// Maximum number of nanoseconds that can be represented when storing seconds
+    /// as `u64` and subsecond nanoseconds as `u32`.
+    const MAX_REPRESENTABLE_NANOSECONDS: u128 = 18_446_744_073_709_551_619_294_967_295;
+    /// Max milliseconds represented in nanoseconds.
+    const MAX_MILLIS_EXPRESSED_AS_NANOS: u128 = 18_446_744_073_709_551_615_999_999;
+    /// Number of nanoseconds in a second.
+    const NANOSECONDS_PER_SECOND: u128 = 1_000_000_000;
+
+    const MAX: Self = Self::from_nanos(Self::MAX_REPRESENTABLE_NANOSECONDS);
+
     /// Current unix time in nanoseconds.
     ///
     /// # Panics
@@ -41,13 +52,13 @@ impl UnixTimestamp {
     }
 
     /// Already accounts for UNIX_EPOCH.
-    pub const fn from_nanoseconds(ns: u128) -> Self {
+    pub const fn from_nanos(ns: u128) -> Self {
         Self(ns)
     }
 
     /// Already accounts for UNIX_EPOCH.
-    pub const fn from_seconds_and_subsec_nanos(seconds: u64, subsec_nanos: u32) -> Self {
-        let unix_nanos = Timestamp::seconds_and_subsec_nanos_to_nanos(seconds, subsec_nanos);
+    pub const fn from_parts(seconds: u64, subsec_nanos: u32) -> Self {
+        let unix_nanos = parts_to_nanos(seconds, subsec_nanos);
         Self(unix_nanos)
     }
 
@@ -57,15 +68,31 @@ impl UnixTimestamp {
         Ok(Self(unix_nanos))
     }
 
+    pub fn as_millis_saturating(&self) -> u64 {
+        (self.as_nanos_clamped_to_u64_millis() / 1_000_000) as u64
+    }
+
     /// Timestamp to seconds and subsec_nanos.
-    pub fn to_seconds_and_subsec_nanos(&self) -> (u64, u32) {
-        Timestamp::ns_to_secs_and_subsec_nanos(self.0)
+    pub fn to_parts(&self) -> (u64, u32) {
+        nanos_to_parts(self.0)
+    }
+
+    /// Timestamp is clamped to max number of millis (as u64), but in nanosecond precision (u128).
+    pub fn as_nanos_clamped_to_u64_millis(&self) -> u128 {
+        nanos_clamped_to_u64_millis(self.0)
     }
 }
 
 impl From<UnixTimestamp> for SystemTime {
-    fn from(unix_timestamp: UnixTimestamp) -> Self {
-        unix_timestamp.into()
+    fn from(timestamp: UnixTimestamp) -> Self {
+        let (secs, nanos) = timestamp.to_parts();
+        let dur_secs = Duration::from_secs(secs);
+        let dur_nanos = Duration::from_nanos(nanos as u64);
+
+        dur_secs
+            .checked_add(dur_nanos)
+            .and_then(|d| UNIX_EPOCH.checked_add(d))
+            .unwrap_or(UNIX_EPOCH)
     }
 }
 
@@ -86,43 +113,39 @@ impl From<SystemTime> for UnixTimestamp {
     }
 }
 
-pub struct Timestamp {
-    unix_nanos: u128,
+pub fn nanos_clamped_to_u64_millis(nanos: u128) -> u128 {
+    nanos.min(UnixTimestamp::MAX_MILLIS_EXPRESSED_AS_NANOS)
 }
 
-impl Timestamp {
-    /// Maximum number of nanoseconds that can be represented when storing seconds
-    /// as `u64` and subsecond nanoseconds as `u32`.
-    const MAX_REPRESENTABLE_NANOSECONDS: u128 = 18_446_744_073_709_551_619_294_967_295;
-    /// Number of nanoseconds in a second.
-    const NANOSECONDS_PER_SECOND: u128 = 1_000_000_000;
+pub fn nanos_as_millis_saturating(nanos: u128) -> u64 {
+    (nanos_clamped_to_u64_millis(nanos) / 1_000_000) as u64
+}
 
-    /// Nanoseconds to seconds and subbsecond nanoseconds.
-    pub const fn ns_to_secs_and_subsec_nanos(nanos: u128) -> (u64, u32) {
-        if nanos > Timestamp::MAX_REPRESENTABLE_NANOSECONDS {
-            return (u64::MAX, u32::MAX);
-        }
-
-        let secs = Self::ns_to_secs(nanos);
-
-        if secs > u64::MAX as u128 {
-            const MAX_NANOSECONDS_CARRY: u128 =
-                u64::MAX as u128 * Timestamp::NANOSECONDS_PER_SECOND;
-
-            (u64::MAX, (nanos - MAX_NANOSECONDS_CARRY) as u32)
-        } else {
-            (secs as u64, (nanos % 1_000_000_000) as u32)
-        }
+/// Nanoseconds to seconds and subbsecond nanoseconds.
+const fn nanos_to_parts(nanos: u128) -> (u64, u32) {
+    if nanos > UnixTimestamp::MAX_REPRESENTABLE_NANOSECONDS {
+        return (u64::MAX, u32::MAX);
     }
 
-    /// Nanoseconds to seconds.
-    pub const fn ns_to_secs(nanos: u128) -> u128 {
-        nanos / 1_000_000_000
-    }
+    let secs = nanos_to_secs(nanos);
 
-    pub const fn seconds_and_subsec_nanos_to_nanos(seconds: u64, subsec_nanos: u32) -> u128 {
-        (seconds as u128 * 1_000_000_000) + subsec_nanos as u128
+    if secs > u64::MAX as u128 {
+        const MAX_NANOSECONDS_CARRY: u128 =
+            u64::MAX as u128 * UnixTimestamp::NANOSECONDS_PER_SECOND;
+
+        (u64::MAX, (nanos - MAX_NANOSECONDS_CARRY) as u32)
+    } else {
+        (secs as u64, (nanos % 1_000_000_000) as u32)
     }
+}
+
+/// Nanoseconds to seconds.
+const fn nanos_to_secs(nanos: u128) -> u128 {
+    nanos / 1_000_000_000
+}
+
+const fn parts_to_nanos(seconds: u64, subsec_nanos: u32) -> u128 {
+    (seconds as u128 * 1_000_000_000) + subsec_nanos as u128
 }
 
 // ------------------------------------------------------------------------------------------------------------------------------------
@@ -158,22 +181,33 @@ mod test {
     use super::*;
 
     #[test]
-    fn timestamp_bar() {
-        let uts = UnixTimestamp::now();
-        let uts_sys_time: SystemTime = uts.into();
-        let back_to_uts: UnixTimestamp = uts_sys_time.into();
-        let mut r: [u8; 6] = [0; 6];
-        loop {
-            rand::rng().fill(&mut r);
-            let idv1 = Uuid::now_v1(&r);
-            println!("{idv1} | {}", idv1.as_u128());
+    fn max_const_is_actually_max() {
+        let ts = UnixTimestamp::MAX;
+        let (secs, subsec_nanos) = ts.to_parts();
+        assert_eq!(
+            u64::MAX,
+            secs,
+            "expected secs ({secs}) to be u64::MAX ({})",
+            u64::MAX
+        );
+        assert_eq!(
+            u32::MAX,
+            subsec_nanos,
+            "expected subsec_nanos ({subsec_nanos}) to be u32::MAX ({})",
+            u32::MAX
+        );
+    }
 
-            // let id = Uuid::now_v7();
-            // println!("uuid = {id}");
-            // let mid = crate::v7::generate_strict().unwrap();
-            // println!("mine = {mid}");
-            // println!();
-        }
+    #[test]
+    fn ts_to_millis() {
+        let ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
+        let unix_ts = UnixTimestamp::from_parts(ts.as_secs(), ts.subsec_nanos());
+        let ts_millis = ts.as_millis() as u64;
+        let unix_millis = unix_ts.as_millis_saturating();
+        assert_eq!(
+            ts_millis, unix_millis,
+            "expected ts_millis ({ts_millis}) to equal unix_millis ({unix_millis})"
+        );
     }
 
     #[test]

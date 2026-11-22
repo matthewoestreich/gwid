@@ -35,9 +35,13 @@ use crate::Uuid;
 use crate::VARIANT_SHIFT;
 use crate::VERSION_SHIFT;
 use crate::builder;
+use crate::builder::Version7;
+use crate::print_bits;
 #[cfg(not(feature = "v7-crypto-rand"))]
 use crate::rand::MathRandom;
 use rand::RngExt;
+use rand::distr::Distribution;
+use rand::distr::StandardUniform;
 use rand::rngs::ThreadRng;
 use std::cell::Cell;
 use std::cell::RefCell;
@@ -53,15 +57,24 @@ use std::time::SystemTimeError;
 use std::time::UNIX_EPOCH;
 
 thread_local! {
-    static CONTEXT: RefCell<u128> = const { RefCell::new(0) };
+    static CONTEXT: RefCell<ContextV7> = RefCell::new(ContextV7::default());
 }
 
-static CONTEXT_GLOBAL: LazyLock<Mutex<u128>> = LazyLock::new(|| Mutex::new(0));
+static CONTEXT_GLOBAL: LazyLock<Mutex<ContextV7>> =
+    LazyLock::new(|| Mutex::new(ContextV7::default()));
+
+#[derive(Default, Debug)]
+struct ContextV7 {
+    pub ts_millis: u64,
+    pub counter: u64,
+}
 
 const RANDOM_A_BITS: u8 = 12;
 const RANDOM_B_BITS: u8 = 62;
 const TIMESTAMP_BITS: u8 = 48;
 const RANDOM_BITS: u8 = 74;
+const COUNTER_BITS: u8 = 30;
+const COUNTER_MAX: u64 = (1 << COUNTER_BITS) - 1;
 const RANDOM_A_TOTAL_VALUES: u16 = 1 << RANDOM_A_BITS;
 /// 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000111111111111
 const RANDOM_A_MAX: u16 = RANDOM_A_TOTAL_VALUES - 1;
@@ -72,44 +85,64 @@ const TIMESTAMP_MAX: u64 = (1 << TIMESTAMP_BITS) - 1;
 const RANDOM_BITS_MAX: u128 = (1 << RANDOM_BITS) - 1;
 const TIMESTAMP_SHIFT: u8 = 80;
 const RANDOM_A_SHIFT: u128 = 64;
+const COUNTER_SHIFT: u128 = 32;
 const VERSION: u8 = 7; // 0b111
 const VARIANT: u8 = 2; // 0b10
 
 impl From<builder::Version7> for Uuid {
     fn from(options: builder::Version7) -> Self {
-        let additional_bits = if options.additional_precision { 12 } else { 0 };
-
-        let entropy: u128 = if options.crypto {
-            rand::rng().random()
+        let (timestamp, mut counter) = if options.global {
+            let mut ctx = CONTEXT_GLOBAL.lock().unwrap_or_else(|p| p.into_inner());
+            ensure_monotonicity(&options, &mut ctx)
         } else {
-            crate::rand::random()
+            CONTEXT.with_borrow_mut(|ctx| ensure_monotonicity(&options, ctx))
         };
 
-        let (curr_secs, curr_subsec_nanos) = options.timestamp.to_seconds_and_subsec_nanos();
+        if options.additional_precision {
+            let (_, subsec_nanos) = options.timestamp.to_parts();
+            let sub_ms_nanos = subsec_nanos % 1_000_000;
+            let r_a = ((RANDOM_A_TOTAL_VALUES as u64 * sub_ms_nanos as u64) / 1_000_000) as u16;
 
-        if options.global {
-            let mut ctx = CONTEXT_GLOBAL.lock().unwrap_or_else(|p| p.into_inner());
-            todo!()
-        } else {
-            CONTEXT.with_borrow_mut(|ctx| {
-                let (prev_secs, prev_random) = unpack_context(*ctx);
-                let is_same_ms = prev_secs == curr_secs;
-                if is_same_ms {
-                    if options.strict {}
-                } else {
-                    // msb is now higher than last time.
-                    // we can grab new rand bits..
-                    let new_random = get_entropy(options.crypto) & RANDOM_BITS_MAX;
-                }
-                todo!();
-            });
+            counter = ((counter >> RANDOM_A_BITS) | (!RANDOM_A_MAX as u64)) & COUNTER_MAX
+                | ((r_a as u64) << COUNTER_BITS);
         }
 
-        Uuid(0_u128.to_be_bytes())
+        let random_b = get_entropy::<u32>(options.crypto);
+
+        let raw_uuid = raw_uuid_from_parts(timestamp, counter, random_b);
+        Uuid(raw_uuid.to_be_bytes())
     }
 }
 
-fn get_entropy(is_crypto: bool) -> u128 {
+/// Returns 64bit timestamp in ms as well as 64 counter bits (of which we use max 42)
+fn ensure_monotonicity(curr: &Version7, prev: &mut ContextV7) -> (u64, u64) {
+    // let (curr_secs, curr_subsec_nanos) = curr.timestamp.to_parts();
+    // println!("curr_seconds = {curr_secs}");
+    // println!("curr_millis  = {curr_millis}");
+    let curr_millis = curr.timestamp.as_millis_saturating();
+    let millis = curr_millis.max(prev.ts_millis);
+
+    let mut counter = prev.counter;
+
+    // In same ms and strict.
+    if curr.strict && millis == prev.ts_millis {
+        // TODO : need to check overflow this is just for testing now.
+        counter += 1;
+    } else {
+        counter = get_entropy::<u64>(curr.crypto);
+    }
+
+    prev.ts_millis = millis;
+    prev.counter = counter;
+
+    (millis, counter)
+}
+
+fn get_entropy<T>(is_crypto: bool) -> T
+where
+    T: crate::rand::RandomValue,
+    StandardUniform: Distribution<T>,
+{
     if is_crypto {
         rand::rng().random()
     } else {
@@ -117,7 +150,21 @@ fn get_entropy(is_crypto: bool) -> u128 {
     }
 }
 
-/// We only  need 48 bits from 'ts' and 74 bits from 'counter'
+// 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+fn raw_uuid_from_parts(unix_ts_ms: u64, counter: u64, random_b: u32) -> u128 {
+    let unix_ts_ms = (unix_ts_ms & TIMESTAMP_MAX) as u128;
+    let random_a = (counter >> COUNTER_BITS) & RANDOM_A_MAX as u64;
+    let counter = counter & COUNTER_MAX;
+
+    (unix_ts_ms << TIMESTAMP_SHIFT) & CLEAR_VERSION_MASK
+        | ((VERSION as u128) << VERSION_SHIFT)
+        | ((random_a as u128) << RANDOM_A_SHIFT) & CLEAR_VARIANT_MASK
+        | ((VARIANT as u128) << VARIANT_SHIFT)
+        | ((counter as u128) << COUNTER_SHIFT)
+        | (random_b as u128)
+}
+
+/// We only need 48 bits from 'ts' and 74 bits from 'counter'
 ///
 /// BIT LAYOUT:
 /// [unused][<----------- unix_ts_ms ---------->][<- 12 bits >][<---------- 30 bits --------->][ <---------- 32 bits ---------->]
@@ -129,8 +176,10 @@ fn pack_context(ts: u64, counter: u128) -> u128 {
 }
 
 /// BIT LAYOUT:
-/// [000000][000000000000000000000000000000000000000000000000][00000000000000000000000000000000000000000000000000000000000000000000000000]
-/// [unused][<---------------- unix_ts_ms ------------------>][<---------------------------- counter ----------------------------------->]
+/// [unused][<----------- unix_ts_ms ---------->][<- 12 bits >][<---------- 30 bits --------->][ <---------- 32 bits ---------->]
+/// [000000000000000000000000000000000000000000[000000000000][000000000000000000000000000000][00000000000000000000000000000000]
+/// [unused][<---------------- unix_ts_ms -------[<    |     >][<--------- counter ---------->][ <---------- random ----------->]
+///                                              [<    +-- counter or additional sub-ms precision >]
 fn unpack_context(value: u128) -> (u64, u128) {
     let random = value & RANDOM_BITS_MAX;
     let unix_ts_ms = (value >> RANDOM_BITS) as u64;
@@ -139,26 +188,57 @@ fn unpack_context(value: u128) -> (u64, u128) {
 
 #[cfg(test)]
 mod test {
-    use crate::print_bits;
-
     use super::*;
+    use crate::{builder::UuidBuilder, print_bits};
+    use std::thread;
 
     #[test]
     fn v7_boof() {
-        let og_ts: u64 = 1795309761 & TIMESTAMP_MAX;
-        let og_rand: u128 = ::rand::random::<u128>() & RANDOM_BITS_MAX;
-        print_bits(og_ts, &format!("og_ts = {og_ts}"));
-        print_bits(og_rand, &format!("og_rand = {og_rand}"));
+        let mut handles = vec![];
 
-        let packed = pack_context(og_ts, og_rand);
-        print_bits(packed, "packed");
+        for i in 0..100 {
+            handles.push(thread::spawn(move || {
+                let mut prev: Uuid = Uuid::zero();
 
-        let (unp_ts, unp_rand) = unpack_context(packed);
-        print_bits(unp_ts, &format!("unpacked_ts = {unp_ts}"));
-        print_bits(unp_rand, &format!("unpacked_rand = {unp_rand}"));
+                for _ in 0..100_000 {
+                    let v7 = UuidBuilder::version7().build();
+                    // println!("{}", v7.as_hex());
 
-        assert!(og_ts == unp_ts, "ts mismatch");
-        assert!(og_rand == unp_rand, "rand mismatch");
+                    if v7 <= prev {
+                        println!(
+                            "thread {i} : NOT MONO\n\tprev = {}\n\tcurr = {}",
+                            prev.as_hex(),
+                            v7.as_hex()
+                        );
+                    }
+
+                    prev = v7;
+                    // println!();
+                }
+            }));
+        }
+
+        for h in handles {
+            h.join().unwrap();
+        }
+
+        /*
+                let mut prev: Uuid = Uuid::zero();
+                loop {
+                    let v7 = UuidBuilder::version7().global().build();
+                    println!("{}", v7.as_hex());
+                    if v7 <= prev {
+                        println!(
+                            "\tNOT MONO | (prev={} @ {}) ; curr={}",
+                            prev.as_hex(),
+                            prev.as_u128(),
+                            v7.as_u128()
+                        );
+                    }
+                    prev = v7;
+                    // println!();
+                }
+        */
     }
 }
 

@@ -10,6 +10,7 @@ use std::time::SystemTimeError;
 pub enum GwidError {
     ParseUUIDError(ParseIntError),
     SystemTimeError(SystemTimeError),
+    TimestampExceedsSystemTimeRange,
     // UuidV7(UUIDv7Error),
 }
 
@@ -18,6 +19,7 @@ impl Display for GwidError {
         use GwidError::*;
         match self {
             ParseUUIDError(e) => write!(f, "Error parsing UUID : {e}"),
+            TimestampExceedsSystemTimeRange => write!(f, "timestamp overflows SystemTime"),
             SystemTimeError(e) => {
                 write!(f, "System time error : {e}")
             } // UuidV7(e) => write!(f, "{e}"),
@@ -48,8 +50,7 @@ impl Error for GwidError {
         match self {
             Self::ParseUUIDError(e) => Some(e),
             Self::SystemTimeError(e) => Some(e),
-            // Self::UuidV7(e) => Some(e),
-            // _ => None,
+            _ => None,
         }
     }
 }
