@@ -159,11 +159,11 @@ fn generate_timestamp_sequence(
     let next_millis = nanos_as_millis_saturating(next_nanos);
     println!("curr_millis = {curr_millis}");
     println!("prev_millis = {next_millis}");
-    let mut counter: u64;
+    let mut next_counter: u64 = context.counter;
     if next_millis > curr_millis {
         println!("  - In new millisecond, reseeding");
         // precision.apply(crate::rng::u64() & RESEED_MASK, timestamp),
-        let mut next_counter = get_entropy::<u64>(is_crypto) & RESEED_MASK;
+        let mut new_counter = get_entropy::<u64>(is_crypto) & RESEED_MASK;
 
         // if self.bits == 0 {
         //     // No additional precision is being used
@@ -176,19 +176,18 @@ fn generate_timestamp_sequence(
             let (_, sub_ms_nanos) = crate::timestamp::nanos_to_parts(next_nanos);
             let sub_ms_nanos = sub_ms_nanos % 1_000_000;
             let random_a = ((4096_u64 * sub_ms_nanos as u64) / 1_000_000) as u16;
-            next_counter >>= 12 | (random_a << 40);
+            new_counter >>= 12 | (random_a << 40);
         }
 
-        counter = next_counter;
+        next_counter = new_counter;
     } else {
         println!("  - In same millisecond - need to increment");
-
-        counter = context.counter + 1;
+        next_counter += 1;
     }
 
     let (next_secs, next_subsec_nanos) = crate::timestamp::nanos_to_parts(next_nanos);
 
-    (counter, next_secs, next_subsec_nanos)
+    (next_counter, next_secs, next_subsec_nanos)
 }
 
 fn generate_sequence(options: &Version7) -> u64 {
