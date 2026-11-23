@@ -81,6 +81,15 @@ impl UnixTimestamp {
     pub fn as_nanos_clamped_to_u64_millis(&self) -> u128 {
         nanos_clamped_to_u64_millis(self.0)
     }
+
+    pub fn submillisecond_precision(&self) -> u16 {
+        let submillis = self.0 % 1_000_000;
+        ((submillis << 12) / 1_000_000) as u16
+    }
+
+    pub const fn as_nanos(&self) -> u128 {
+        self.0
+    }
 }
 
 impl From<UnixTimestamp> for SystemTime {
@@ -122,7 +131,7 @@ pub fn nanos_as_millis_saturating(nanos: u128) -> u64 {
 }
 
 /// Nanoseconds to seconds and subbsecond nanoseconds.
-const fn nanos_to_parts(nanos: u128) -> (u64, u32) {
+pub const fn nanos_to_parts(nanos: u128) -> (u64, u32) {
     if nanos > UnixTimestamp::MAX_REPRESENTABLE_NANOSECONDS {
         return (u64::MAX, u32::MAX);
     }
@@ -144,7 +153,7 @@ const fn nanos_to_secs(nanos: u128) -> u128 {
     nanos / 1_000_000_000
 }
 
-const fn parts_to_nanos(seconds: u64, subsec_nanos: u32) -> u128 {
+pub const fn parts_to_nanos(seconds: u64, subsec_nanos: u32) -> u128 {
     (seconds as u128 * 1_000_000_000) + subsec_nanos as u128
 }
 

@@ -191,6 +191,15 @@ impl Uuid {
     pub fn as_hex(&self) -> String {
         crate::encode(self.as_u128())
     }
+
+    pub fn get_timestamp(&self) -> (u128, u128) {
+        let uuid = self.as_u128();
+        let timestamp_ms = uuid >> 80;
+        let submillis = (uuid >> 64) & 0xFFF;
+        let submillis_ns = (submillis * 1_000_000) / (1 << 12);
+        let ns = timestamp_ms * 1_000_000 + submillis_ns;
+        (timestamp_ms, ns)
+    }
 }
 
 impl From<Bytes> for Uuid {

@@ -36,107 +36,200 @@ use crate::VARIANT_SHIFT;
 use crate::VERSION_SHIFT;
 use crate::builder;
 use crate::builder::Version7;
-use crate::print_bits;
-#[cfg(not(feature = "v7-crypto-rand"))]
-use crate::rand::MathRandom;
+use crate::timestamp::UnixTimestamp;
+use crate::timestamp::nanos_as_millis_saturating;
 use rand::RngExt;
 use rand::distr::Distribution;
 use rand::distr::StandardUniform;
-use rand::rngs::ThreadRng;
-use std::cell::Cell;
 use std::cell::RefCell;
-use std::error;
-use std::fmt::Display;
-use std::fmt::Formatter;
-use std::fmt::Result as FmtResult;
-use std::sync::LazyLock;
+use std::cell::RefMut;
+use std::ops::Deref;
+use std::ops::DerefMut;
 use std::sync::Mutex;
-use std::time::Duration;
-use std::time::SystemTime;
-use std::time::SystemTimeError;
-use std::time::UNIX_EPOCH;
+use std::sync::MutexGuard;
+
+// # BIT LAYOUT
+//
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+//
+// [<- Bit 127]                                                                                                            [Bit 0 ->]
+// [<----------------- 48 Bits -------------------->][< 12 bits ->][<-------- 30 bits ----------->][<---------- 32 bits ----------->]
+// [000000000000000000000000000000000000000000000000][000000000000][000000000000000000000000000000][00000000000000000000000000000000]
+// [<------- Timestamp, millisecond precision ----->][<- Sub-ms ->][<--------- counter ---------->][<--------- random bits -------->]
+//                                                   [  precision ]
+//                                                   [ or counter ]
+//
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+//
+// # DEFINITIONS
+//
+// ## Strict Mode :
+//      - The uuid rfc only requires timestamps to be monotonic at the millisecond level.
+//      - In strict mode, we ensure timestamps are strictly monotonic, at every timestamp precision.
+//
+// ## Additional Precision Mode :
+//      - If enabled, uses `random_a` field (12 bits) for sub-millisecond timestamp precision.
+//      - If disabled, the `random_a` field (12 bits) are added to the MSB (30 bits) of random_b
+//
+// ## Crypto :
+//      - If enabled, use crypto secure randomness
+//      - If disabled, use MathRandom
+//
+// ## Global :
+//      - If enabled, uses shared context (coontext wrapped in Mutex)
+//      - If disabled, uses **thread-local** context.
+
+// When in strict mode:
+//      - Timestamps should always be, at minimum, **thread-local** monotonic, even inside same ms
+//      timestamp
+//      - If GLOBAL is enabled, we don't have to do anything bc our context is now in a Mutex.
+//
+//
 
 thread_local! {
-    static CONTEXT: RefCell<ContextV7> = RefCell::new(ContextV7::default());
+    static CONTEXT_LOCAL: RefCell<ContextV7> = const { RefCell::new(ContextV7::new()) };
 }
 
-static CONTEXT_GLOBAL: LazyLock<Mutex<ContextV7>> =
-    LazyLock::new(|| Mutex::new(ContextV7::default()));
+static CONTEXT_GLOBAL: Mutex<ContextV7> = Mutex::new(ContextV7::new());
 
-#[derive(Default, Debug)]
-struct ContextV7 {
-    pub ts_millis: u64,
-    pub counter: u64,
-}
-
-const RANDOM_A_BITS: u8 = 12;
-const RANDOM_B_BITS: u8 = 62;
-const TIMESTAMP_BITS: u8 = 48;
-const RANDOM_BITS: u8 = 74;
-const COUNTER_BITS: u8 = 30;
-const COUNTER_MAX: u64 = (1 << COUNTER_BITS) - 1;
-const RANDOM_A_TOTAL_VALUES: u16 = 1 << RANDOM_A_BITS;
-/// 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000111111111111
-const RANDOM_A_MAX: u16 = RANDOM_A_TOTAL_VALUES - 1;
-/// 00000000000000000000000000000000000000000000000000000000000000000011111111111111111111111111111111111111111111111111111111111111
-const RANDOM_B_MAX: u64 = (1 << RANDOM_B_BITS) - 1;
-/// 00000000000000000000000000000000000000000000000000000000000000000000000000000000111111111111111111111111111111111111111111111111
-const TIMESTAMP_MAX: u64 = (1 << TIMESTAMP_BITS) - 1;
-const RANDOM_BITS_MAX: u128 = (1 << RANDOM_BITS) - 1;
-const TIMESTAMP_SHIFT: u8 = 80;
-const RANDOM_A_SHIFT: u128 = 64;
-const COUNTER_SHIFT: u128 = 32;
-const VERSION: u8 = 7; // 0b111
-const VARIANT: u8 = 2; // 0b10
+const RANDOM_A_BITS: u32 = 12;
+const RANDOM_B_MSB_BITS: u32 = 30;
+const COUNTER_BITS: u32 = RANDOM_A_BITS + RANDOM_B_MSB_BITS;
+const RANDOM_A_MAX: u64 = (1u64 << RANDOM_A_BITS) - 1;
+const COUNTER_MAX: u64 = (1u64 << (RANDOM_A_BITS + RANDOM_B_MSB_BITS)) - 1;
+const RESEED_MASK: u64 = COUNTER_MAX >> 1;
+const TIMESTAMP_SHIFT: u32 = 80;
+const RANDOM_A_SHIFT: u32 = 64;
+const COUNTER_SHIFT: u32 = 32;
+const VERSION: u128 = 7;
+const VARIANT: u128 = 2;
 
 impl From<builder::Version7> for Uuid {
     fn from(options: builder::Version7) -> Self {
-        let (timestamp, mut counter) = if options.global {
-            let mut ctx = CONTEXT_GLOBAL.lock().unwrap_or_else(|p| p.into_inner());
-            ensure_monotonicity(&options, &mut ctx)
+        let (seconds, subsec_nanos) = options.timestamp.to_parts();
+
+        let mut context = get_context(if options.global {
+            ContextV7Scope::Global
         } else {
-            CONTEXT.with_borrow_mut(|ctx| ensure_monotonicity(&options, ctx))
-        };
+            ContextV7Scope::ThreadLocal
+        });
 
-        if options.additional_precision {
-            let (_, subsec_nanos) = options.timestamp.to_parts();
-            let sub_ms_nanos = subsec_nanos % 1_000_000;
-            let r_a = ((RANDOM_A_TOTAL_VALUES as u64 * sub_ms_nanos as u64) / 1_000_000) as u16;
+        let (counter, seconds, subsec_nanos) = generate_timestamp_sequence(
+            seconds,
+            subsec_nanos,
+            options.crypto,
+            options.additional_precision,
+            &mut context,
+        );
 
-            counter = ((counter >> RANDOM_A_BITS) | (!RANDOM_A_MAX as u64)) & COUNTER_MAX
-                | ((r_a as u64) << COUNTER_BITS);
-        }
+        // good up til here!!
 
-        let random_b = get_entropy::<u32>(options.crypto);
+        let millis = options.timestamp.as_millis_saturating();
+        let timestamp = millis as u128;
+        let random_a: u16 = (crate::rand::random::<u64>() & RANDOM_A_MAX) as u16;
+        let counter = (counter & COUNTER_MAX) as u128;
 
-        let raw_uuid = raw_uuid_from_parts(timestamp, counter, random_b);
+        let raw_uuid = (timestamp << TIMESTAMP_SHIFT)
+            | (VERSION << VERSION_SHIFT)
+            | ((random_a as u128) << RANDOM_A_SHIFT)
+            | (VARIANT << VARIANT_SHIFT)
+            | (counter << COUNTER_SHIFT)
+            | counter;
+
         Uuid(raw_uuid.to_be_bytes())
     }
 }
 
-/// Returns 64bit timestamp in ms as well as 64 counter bits (of which we use max 42)
-fn ensure_monotonicity(curr: &Version7, prev: &mut ContextV7) -> (u64, u64) {
-    // let (curr_secs, curr_subsec_nanos) = curr.timestamp.to_parts();
-    // println!("curr_seconds = {curr_secs}");
-    // println!("curr_millis  = {curr_millis}");
-    let curr_millis = curr.timestamp.as_millis_saturating();
-    let millis = curr_millis.max(prev.ts_millis);
+/// Returns (counter_value, seconds, subsec_nanos)
+fn generate_timestamp_sequence(
+    seconds: u64,
+    subsec_nanos: u32,
+    is_crypto: bool,
+    is_additional_precision: bool,
+    context: &mut ContextGuard,
+) -> (u64, u64, u32) {
+    let curr_unix_nanos = crate::timestamp::parts_to_nanos(seconds, subsec_nanos);
+    let prev_timestamp = context.timestamp;
 
-    let mut counter = prev.counter;
+    // Enforce nondecreasing time.
+    let next_nanos = curr_unix_nanos.max(prev_timestamp.as_nanos());
 
-    // In same ms and strict.
-    if curr.strict && millis == prev.ts_millis {
-        // TODO : need to check overflow this is just for testing now.
-        counter += 1;
+    // check if ms changed
+    let curr_millis = nanos_as_millis_saturating(curr_unix_nanos);
+    let next_millis = nanos_as_millis_saturating(next_nanos);
+    println!("curr_millis = {curr_millis}");
+    println!("prev_millis = {next_millis}");
+    let mut counter: u64;
+    if next_millis > curr_millis {
+        println!("  - In new millisecond, reseeding");
+        // precision.apply(crate::rng::u64() & RESEED_MASK, timestamp),
+        let mut next_counter = get_entropy::<u64>(is_crypto) & RESEED_MASK;
+
+        // if self.bits == 0 {
+        //     // No additional precision is being used
+        //     return counter;
+        // }
+        // let additional = (timestamp.unix_nanos % 1_000_000) as u64 / self.factor;
+        // (counter & self.mask) | (additional << self.shift)
+
+        if is_additional_precision {
+            let (_, sub_ms_nanos) = crate::timestamp::nanos_to_parts(next_nanos);
+            let sub_ms_nanos = sub_ms_nanos % 1_000_000;
+            let random_a = ((4096_u64 * sub_ms_nanos as u64) / 1_000_000) as u16;
+            next_counter >>= 12 | (random_a << 40);
+        }
+
+        counter = next_counter;
     } else {
-        counter = get_entropy::<u64>(curr.crypto);
+        println!("  - In same millisecond - need to increment");
+
+        counter = context.counter + 1;
     }
 
-    prev.ts_millis = millis;
-    prev.counter = counter;
+    let (next_secs, next_subsec_nanos) = crate::timestamp::nanos_to_parts(next_nanos);
 
-    (millis, counter)
+    (counter, next_secs, next_subsec_nanos)
 }
+
+fn generate_sequence(options: &Version7) -> u64 {
+    if options.additional_precision {
+        let random_a = options.timestamp.submillisecond_precision() as u64;
+        let counter = get_entropy::<u32>(options.crypto) as u64 & COUNTER_MAX;
+
+        (random_a << RANDOM_B_MSB_BITS) | counter
+    } else {
+        get_entropy::<u64>(options.crypto) & COUNTER_MAX
+    }
+}
+
+/*
+fn ensure_monotonicity(curr: &Version7, prev: &mut ContextV7) -> (u64, u64) {
+    let (secs, nanos) = curr.timestamp.to_parts();
+    let millis = secs
+        .saturating_mul(1000)
+        .saturating_add(nanos as u64 / 1_000_000);
+
+    let next_millis = std::cmp::max(millis, prev.ts_millis);
+    let mut next_counter = prev.counter;
+
+    if next_millis > prev.ts_millis {
+        println!(
+            "diff millisecond! [ensure_monotonicity] prev_millis = {} | next_millis ={next_millis}",
+            prev.ts_millis
+        );
+        next_counter = get_entropy(false);
+    }
+    // In same ms
+    else if next_millis == prev.ts_millis {
+        //
+    }
+
+    prev.ts_millis = next_millis;
+    prev.counter = next_counter;
+
+    (next_millis, next_counter)
+}
+*/
 
 fn get_entropy<T>(is_crypto: bool) -> T
 where
@@ -150,50 +243,169 @@ where
     }
 }
 
-// 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
-fn raw_uuid_from_parts(unix_ts_ms: u64, counter: u64, random_b: u32) -> u128 {
-    let unix_ts_ms = (unix_ts_ms & TIMESTAMP_MAX) as u128;
-    let random_a = (counter >> COUNTER_BITS) & RANDOM_A_MAX as u64;
-    let counter = counter & COUNTER_MAX;
+fn raw_uuid_from_parts(unix_ts_ms: u64, sequence: u64, random_b: u32) -> u128 {
+    let timestamp = unix_ts_ms as u128;
+    let random_a = (sequence >> RANDOM_B_MSB_BITS) & RANDOM_A_MAX;
+    let counter = sequence & COUNTER_MAX;
 
-    (unix_ts_ms << TIMESTAMP_SHIFT) & CLEAR_VERSION_MASK
-        | ((VERSION as u128) << VERSION_SHIFT)
-        | ((random_a as u128) << RANDOM_A_SHIFT) & CLEAR_VARIANT_MASK
-        | ((VARIANT as u128) << VARIANT_SHIFT)
+    (timestamp << TIMESTAMP_SHIFT)
+        | (VERSION << VERSION_SHIFT)
+        | ((random_a as u128) << RANDOM_A_SHIFT)
+        | (VARIANT << VARIANT_SHIFT)
         | ((counter as u128) << COUNTER_SHIFT)
-        | (random_b as u128)
+        | random_b as u128
 }
 
-/// We only need 48 bits from 'ts' and 74 bits from 'counter'
-///
-/// BIT LAYOUT:
-/// [unused][<----------- unix_ts_ms ---------->][<- 12 bits >][<---------- 30 bits --------->][ <---------- 32 bits ---------->]
-/// [000000000000000000000000000000000000000000[000000000000][000000000000000000000000000000][00000000000000000000000000000000]
-/// [unused][<---------------- unix_ts_ms -------[<    |     >][<--------- counter ---------->][ <---------- random ----------->]
-///                                              [<    +-- counter or additional sub-ms precision >]
-fn pack_context(ts: u64, counter: u128) -> u128 {
-    (((ts & TIMESTAMP_MAX) as u128) << RANDOM_BITS) | counter & RANDOM_BITS_MAX
+#[derive(Default, Debug)]
+struct ContextV7 {
+    pub timestamp: UnixTimestamp,
+    pub counter: u64,
 }
 
-/// BIT LAYOUT:
-/// [unused][<----------- unix_ts_ms ---------->][<- 12 bits >][<---------- 30 bits --------->][ <---------- 32 bits ---------->]
-/// [000000000000000000000000000000000000000000[000000000000][000000000000000000000000000000][00000000000000000000000000000000]
-/// [unused][<---------------- unix_ts_ms -------[<    |     >][<--------- counter ---------->][ <---------- random ----------->]
-///                                              [<    +-- counter or additional sub-ms precision >]
-fn unpack_context(value: u128) -> (u64, u128) {
-    let random = value & RANDOM_BITS_MAX;
-    let unix_ts_ms = (value >> RANDOM_BITS) as u64;
-    (unix_ts_ms, random)
+impl ContextV7 {
+    pub const fn new() -> Self {
+        Self {
+            timestamp: UnixTimestamp(0),
+            counter: 0,
+        }
+    }
+}
+
+enum ContextGuard<'a> {
+    Global(MutexGuard<'a, ContextV7>),
+    // NonNull<MyContext> automatically makes ContextGuard !Send and !Sync,
+    // preventing it from ever escaping the thread that created it.
+    ThreadLocal(RefMut<'a, ContextV7>),
+}
+
+impl Deref for ContextGuard<'_> {
+    type Target = ContextV7;
+
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        match self {
+            ContextGuard::Global(g) => g,
+            ContextGuard::ThreadLocal(l) => l,
+        }
+    }
+}
+
+impl DerefMut for ContextGuard<'_> {
+    #[inline]
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        match self {
+            ContextGuard::Global(g) => g,
+            ContextGuard::ThreadLocal(l) => l,
+        }
+    }
+}
+
+enum ContextV7Scope {
+    Global,
+    ThreadLocal,
+}
+
+#[inline]
+fn get_context(scope: ContextV7Scope) -> ContextGuard<'static> {
+    match scope {
+        ContextV7Scope::Global => ContextGuard::Global(CONTEXT_GLOBAL.lock().unwrap()),
+        ContextV7Scope::ThreadLocal => {
+            // SAFETY: CONTEXT_LOCAL lives for the entire thread lifetime, and RefMut
+            // is !Send/!Sync so it cannot outlive this thread.
+            let borrow = CONTEXT_LOCAL.with(|cell| unsafe {
+                let ptr = cell as *const RefCell<ContextV7>;
+                (*ptr).borrow_mut()
+            });
+            ContextGuard::ThreadLocal(borrow)
+        }
+    }
 }
 
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::{builder::UuidBuilder, print_bits};
+    use crate::{builder::UuidBuilder, print_bits, timestamp::UnixTimestamp};
     use std::thread;
 
+    /*
     #[test]
-    fn v7_boof() {
+    fn additional_precision_and_no_strict_mode_may_not_maintain_monotonicity_in_same_sub_ms_bucket()
+    {
+        let timestamp = UnixTimestamp::from_nanos(1795395060835011000);
+
+        let options = Version7 {
+            strict: false,
+            additional_precision: true,
+            timestamp,
+            global: false,
+            crypto: false,
+        };
+
+        let mut ctx = ContextV7 {
+            ts_millis: timestamp.as_millis_saturating(),
+            counter: COUNTER_MAX / 2,
+        };
+
+        let counter = 0;
+        let (_, actual_counter) = ensure_monotonicity(&options, &mut ctx, counter);
+
+        assert_eq!(actual_counter, 0);
+    }
+    */
+
+    #[test]
+    fn v7_single_thread() {
+        let start = UuidBuilder::version7().strict().build();
+        let mut prev: Uuid = start;
+        let mut prev_ms_boundary = start;
+        let mut num_ids_created_in_same_ms = 0;
+
+        for _ in 0..100_000 {
+            let v7 = UuidBuilder::version7().strict().build();
+            // let hex = v7.as_hex();
+
+            let v7_time = v7.get_timestamp().0;
+            let prev_time = prev.get_timestamp().0;
+
+            if v7_time > prev_time {
+                //println!("- should be next ms!");
+                println!("prev ms boundary = {}", prev_ms_boundary.as_hex());
+                println!("curr_ms_boundary = {}", v7.as_hex());
+                let is_monotonic = v7 > prev_ms_boundary;
+                println!("    curr > prev? {is_monotonic}",);
+                println!("    there were {num_ids_created_in_same_ms} ids created in this ms");
+                num_ids_created_in_same_ms = 0;
+                if !is_monotonic {
+                    println!("{}", "*".repeat(100));
+                }
+                println!();
+                prev_ms_boundary = prev;
+            } else if v7_time == prev_time {
+                num_ids_created_in_same_ms += 1;
+            } else {
+                println!("\n\nTIME WENT BACKWARDS! \n\n");
+            }
+
+            // print!("{hex}");
+
+            // if v7 <= prev {
+            // print!("  *******");
+            //println!(
+            // "NOT MONO\n\tprev = ({} | {})\n\tcurr = ({} | {})",
+            // prev.as_hex(),
+            // prev.get_timestamp().1,
+            // v7.as_hex(),
+            // v7.get_timestamp().1,
+            //);
+            // }
+
+            prev = v7;
+            // println!();
+        }
+    }
+
+    #[test]
+    fn v7_multithread() {
         let mut handles = vec![];
 
         for i in 0..100 {
@@ -201,14 +413,16 @@ mod test {
                 let mut prev: Uuid = Uuid::zero();
 
                 for _ in 0..100_000 {
-                    let v7 = UuidBuilder::version7().build();
+                    let v7 = UuidBuilder::version7().additional_precision().build();
                     // println!("{}", v7.as_hex());
 
                     if v7 <= prev {
                         println!(
-                            "thread {i} : NOT MONO\n\tprev = {}\n\tcurr = {}",
+                            "thread {i} : NOT MONO\n\tprev = ({} | {})\n\tcurr = ({} | {})",
                             prev.as_hex(),
-                            v7.as_hex()
+                            prev.get_timestamp().1,
+                            v7.as_hex(),
+                            v7.get_timestamp().1,
                         );
                     }
 
