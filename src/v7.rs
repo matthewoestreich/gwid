@@ -36,6 +36,7 @@ use crate::VARIANT_SHIFT;
 use crate::VERSION_SHIFT;
 use crate::builder;
 use crate::builder::Version7;
+use crate::print_bits;
 use crate::timestamp::UnixTimestamp;
 use crate::timestamp::nanos_as_millis_saturating;
 use rand::RngExt;
@@ -93,11 +94,14 @@ thread_local! {
 static CONTEXT_GLOBAL: Mutex<ContextV7> = Mutex::new(ContextV7::new());
 
 const RANDOM_A_BITS: u32 = 12;
-const RANDOM_B_MSB_BITS: u32 = 30;
-const COUNTER_BITS: u32 = RANDOM_A_BITS + RANDOM_B_MSB_BITS;
+const RANDOM_B_HIGH_BITS: u32 = 30;
+const TIMESTAMP_BITS: u32 = 48;
+const COUNTER_BITS: u32 = RANDOM_A_BITS + RANDOM_B_HIGH_BITS;
 const RANDOM_A_MAX: u64 = (1u64 << RANDOM_A_BITS) - 1;
-const COUNTER_MAX: u64 = (1u64 << (RANDOM_A_BITS + RANDOM_B_MSB_BITS)) - 1;
-const RESEED_MASK: u64 = COUNTER_MAX >> 1;
+const COUNTER_LOW_MASK: u64 = (1u64 << RANDOM_B_HIGH_BITS) - 1;
+const COUNTER_MAX: u64 = (1u64 << COUNTER_BITS) - 1;
+const RESEED_MASK: u64 = (1u64 << (COUNTER_BITS - 1)) - 1;
+const TIMESTAMP_MAX: u64 = (1 << TIMESTAMP_BITS) - 1;
 const TIMESTAMP_SHIFT: u32 = 80;
 const RANDOM_A_SHIFT: u32 = 64;
 const COUNTER_SHIFT: u32 = 32;
@@ -114,27 +118,30 @@ impl From<builder::Version7> for Uuid {
             ContextV7Scope::ThreadLocal
         });
 
-        let (counter, seconds, subsec_nanos) = generate_timestamp_sequence(
-            seconds,
-            subsec_nanos,
-            options.crypto,
-            options.additional_precision,
-            &mut context,
-        );
+        let (counter, seconds, subsec_nanos) =
+            generate_timestamp_sequence(seconds, subsec_nanos, &options, &mut context);
 
-        // good up til here!!
+        let next_timestamp = UnixTimestamp::from_parts(seconds, subsec_nanos);
 
-        let millis = options.timestamp.as_millis_saturating();
-        let timestamp = millis as u128;
-        let random_a: u16 = (crate::rand::random::<u64>() & RANDOM_A_MAX) as u16;
-        let counter = (counter & COUNTER_MAX) as u128;
+        context.timestamp = next_timestamp;
+        context.counter = counter;
 
-        let raw_uuid = (timestamp << TIMESTAMP_SHIFT)
+        let timestamp_millis = (next_timestamp.as_millis_saturating() & TIMESTAMP_MAX) as u128;
+        let random_a = (counter >> RANDOM_B_HIGH_BITS) as u128;
+        let counter = (counter & COUNTER_LOW_MASK) as u128;
+        let random_b = get_entropy::<u32>(options.crypto) as u128;
+
+        // print_bits(timestamp, "millis");
+        //  print_bits(random_a, "random_a");
+        //  print_bits(counter, "counter : 30 bits");
+        // print_bits(random_b, "random_b : 32 bits");
+
+        let raw_uuid = (timestamp_millis << TIMESTAMP_SHIFT)
             | (VERSION << VERSION_SHIFT)
-            | ((random_a as u128) << RANDOM_A_SHIFT)
+            | (random_a << RANDOM_A_SHIFT)
             | (VARIANT << VARIANT_SHIFT)
             | (counter << COUNTER_SHIFT)
-            | counter;
+            | random_b;
 
         Uuid(raw_uuid.to_be_bytes())
     }
@@ -144,91 +151,67 @@ impl From<builder::Version7> for Uuid {
 fn generate_timestamp_sequence(
     seconds: u64,
     subsec_nanos: u32,
-    is_crypto: bool,
-    is_additional_precision: bool,
+    options: &Version7,
     context: &mut ContextGuard,
 ) -> (u64, u64, u32) {
     let curr_unix_nanos = crate::timestamp::parts_to_nanos(seconds, subsec_nanos);
     let prev_timestamp = context.timestamp;
+    let prev_nanos = prev_timestamp.as_nanos();
 
     // Enforce nondecreasing time.
-    let next_nanos = curr_unix_nanos.max(prev_timestamp.as_nanos());
+    // prev_timestamp.advance(curr_unix_nanos)
+    let next_timestamp = curr_unix_nanos.max(prev_nanos);
 
     // check if ms changed
-    let curr_millis = nanos_as_millis_saturating(curr_unix_nanos);
-    let next_millis = nanos_as_millis_saturating(next_nanos);
-    println!("curr_millis = {curr_millis}");
-    println!("prev_millis = {next_millis}");
-    let mut next_counter: u64 = context.counter;
-    if next_millis > curr_millis {
-        println!("  - In new millisecond, reseeding");
-        // precision.apply(crate::rng::u64() & RESEED_MASK, timestamp),
-        let mut new_counter = get_entropy::<u64>(is_crypto) & RESEED_MASK;
+    let prev_millis = nanos_as_millis_saturating(prev_nanos);
+    let next_millis = nanos_as_millis_saturating(next_timestamp);
 
-        // if self.bits == 0 {
-        //     // No additional precision is being used
-        //     return counter;
-        // }
-        // let additional = (timestamp.unix_nanos % 1_000_000) as u64 / self.factor;
-        // (counter & self.mask) | (additional << self.shift)
+    let precision_params = calculate_precision_parameters(options.additional_precision);
 
-        if is_additional_precision {
-            let (_, sub_ms_nanos) = crate::timestamp::nanos_to_parts(next_nanos);
-            let sub_ms_nanos = sub_ms_nanos % 1_000_000;
-            let random_a = ((4096_u64 * sub_ms_nanos as u64) / 1_000_000) as u16;
-            new_counter >>= 12 | (random_a << 40);
-        }
-
-        next_counter = new_counter;
+    let next_counter = if next_millis > prev_millis {
+        let reseeded_counter = get_entropy::<u64>(options.crypto) & RESEED_MASK;
+        apply_precision(reseeded_counter, next_timestamp, precision_params)
+    } else if next_millis == prev_millis && options.strict {
+        let next = context.counter + 1;
+        std::cmp::max(
+            next,
+            apply_precision(next, next_timestamp, precision_params),
+        )
     } else {
-        println!("  - In same millisecond - need to increment");
-        next_counter += 1;
-    }
+        get_entropy::<u64>(options.crypto) & RESEED_MASK
+    };
 
-    let (next_secs, next_subsec_nanos) = crate::timestamp::nanos_to_parts(next_nanos);
+    let (next_secs, next_subsec_nanos) = crate::timestamp::nanos_to_parts(next_timestamp);
 
     (next_counter, next_secs, next_subsec_nanos)
 }
 
-fn generate_sequence(options: &Version7) -> u64 {
-    if options.additional_precision {
-        let random_a = options.timestamp.submillisecond_precision() as u64;
-        let counter = get_entropy::<u32>(options.crypto) as u64 & COUNTER_MAX;
+fn apply_precision(counter: u64, next_timestamp: u128, params: PrecisionParameters) -> u64 {
+    if params.bits == 0 {
+        return counter;
+    }
 
-        (random_a << RANDOM_B_MSB_BITS) | counter
+    let additional = ((next_timestamp % 1_000_000) * (1u128 << params.bits)) / 1_000_000;
+
+    (counter & params.mask) | ((additional as u64) << params.shift)
+}
+
+fn calculate_precision_parameters(is_additional_precision: bool) -> PrecisionParameters {
+    let bits = if is_additional_precision {
+        RANDOM_A_BITS as usize
     } else {
-        get_entropy::<u64>(options.crypto) & COUNTER_MAX
+        0
+    };
+
+    let counter_bits = COUNTER_BITS as usize;
+    let counter_bits_remaining = counter_bits - bits;
+
+    PrecisionParameters {
+        bits,
+        mask: (1u64 << counter_bits_remaining) - 1,
+        shift: counter_bits_remaining as u32,
     }
 }
-
-/*
-fn ensure_monotonicity(curr: &Version7, prev: &mut ContextV7) -> (u64, u64) {
-    let (secs, nanos) = curr.timestamp.to_parts();
-    let millis = secs
-        .saturating_mul(1000)
-        .saturating_add(nanos as u64 / 1_000_000);
-
-    let next_millis = std::cmp::max(millis, prev.ts_millis);
-    let mut next_counter = prev.counter;
-
-    if next_millis > prev.ts_millis {
-        println!(
-            "diff millisecond! [ensure_monotonicity] prev_millis = {} | next_millis ={next_millis}",
-            prev.ts_millis
-        );
-        next_counter = get_entropy(false);
-    }
-    // In same ms
-    else if next_millis == prev.ts_millis {
-        //
-    }
-
-    prev.ts_millis = next_millis;
-    prev.counter = next_counter;
-
-    (next_millis, next_counter)
-}
-*/
 
 fn get_entropy<T>(is_crypto: bool) -> T
 where
@@ -242,17 +225,10 @@ where
     }
 }
 
-fn raw_uuid_from_parts(unix_ts_ms: u64, sequence: u64, random_b: u32) -> u128 {
-    let timestamp = unix_ts_ms as u128;
-    let random_a = (sequence >> RANDOM_B_MSB_BITS) & RANDOM_A_MAX;
-    let counter = sequence & COUNTER_MAX;
-
-    (timestamp << TIMESTAMP_SHIFT)
-        | (VERSION << VERSION_SHIFT)
-        | ((random_a as u128) << RANDOM_A_SHIFT)
-        | (VARIANT << VARIANT_SHIFT)
-        | ((counter as u128) << COUNTER_SHIFT)
-        | random_b as u128
+struct PrecisionParameters {
+    bits: usize,
+    mask: u64,
+    shift: u32,
 }
 
 #[derive(Default, Debug)]
@@ -353,14 +329,30 @@ mod test {
     */
 
     #[test]
+    fn uuid_example_from_rfc() {
+        //for _ in 0..1000 {
+        loop {
+            let v7 = UuidBuilder::version7().build();
+            println!("{}", v7.as_hex());
+            // println!();
+        }
+    }
+
+    #[test]
     fn v7_single_thread() {
-        let start = UuidBuilder::version7().strict().build();
+        fn new_v7() -> Uuid {
+            UuidBuilder::version7().build()
+        }
+
+        let start = new_v7();
         let mut prev: Uuid = start;
         let mut prev_ms_boundary = start;
         let mut num_ids_created_in_same_ms = 0;
 
-        for _ in 0..100_000 {
-            let v7 = UuidBuilder::version7().strict().build();
+        let mut is_sub_ms_monotonic = true;
+
+        for _ in 0..1_000_000 {
+            let v7 = new_v7();
             // let hex = v7.as_hex();
 
             let v7_time = v7.get_timestamp().0;
@@ -368,19 +360,131 @@ mod test {
 
             if v7_time > prev_time {
                 //println!("- should be next ms!");
-                println!("prev ms boundary = {}", prev_ms_boundary.as_hex());
-                println!("curr_ms_boundary = {}", v7.as_hex());
-                let is_monotonic = v7 > prev_ms_boundary;
-                println!("    curr > prev? {is_monotonic}",);
-                println!("    there were {num_ids_created_in_same_ms} ids created in this ms");
+                println!(
+                    "prev ms boundary      = {} | {}",
+                    prev_ms_boundary.as_hex(),
+                    prev_ms_boundary.as_u128()
+                );
+                println!("curr_ms_boundary      = {} | {}", v7.as_hex(), v7.as_u128());
+                println!("curr_ms_boundary_time = {prev_time} -> {v7_time}");
+
+                let is_monotonic_across_ms_bounds = v7 > prev_ms_boundary;
+                println!("    curr > prev? {is_monotonic_across_ms_bounds}",);
+                println!(
+                    "    there were {num_ids_created_in_same_ms} ids created in this ms. were they all monotonic? {is_sub_ms_monotonic}"
+                );
+                assert!(
+                    v7 > prev_ms_boundary,
+                    "ms monotonicity is a requirement of v7!"
+                );
+
                 num_ids_created_in_same_ms = 0;
-                if !is_monotonic {
+                is_sub_ms_monotonic = true;
+
+                if !is_monotonic_across_ms_bounds {
                     println!("{}", "*".repeat(100));
                 }
+
                 println!();
-                prev_ms_boundary = prev;
+                prev_ms_boundary = v7;
             } else if v7_time == prev_time {
                 num_ids_created_in_same_ms += 1;
+                // if we found a non mono sub-ms dont overwrite it.
+                if is_sub_ms_monotonic {
+                    is_sub_ms_monotonic = prev < v7;
+                }
+            } else {
+                println!("\n\nTIME WENT BACKWARDS! \n\n");
+            }
+
+            // print!("{hex}");
+
+            // if v7 <= prev {
+            // print!("  *******");
+            //println!(
+            // "NOT MONO\n\tprev = ({} | {})\n\tcurr = ({} | {})",
+            // prev.as_hex(),
+            // prev.get_timestamp().1,
+            // v7.as_hex(),
+            // v7.get_timestamp().1,
+            //);
+            // }
+
+            prev = v7;
+            // println!();
+        }
+    }
+
+    #[test]
+    fn uuid_single_thread() {
+        fn new_v7() -> uuid::Uuid {
+            uuid::Uuid::now_v7()
+        }
+
+        let start = new_v7();
+        let mut prev: uuid::Uuid = start;
+        let mut prev_ms_boundary = start;
+        let mut num_ids_created_in_same_ms = 0;
+
+        let mut is_sub_ms_monotonic = true;
+
+        for _ in 0..1_000_000 {
+            let v7 = new_v7();
+            // let hex = v7.as_hex();
+
+            let v7_time = v7
+                .get_timestamp()
+                .map(|ts| {
+                    let (seconds, nanos) = ts.to_unix();
+                    seconds * 1_000 + u64::from(nanos / 1_000_000)
+                })
+                .unwrap();
+
+            let prev_time = prev
+                .get_timestamp()
+                .map(|ts| {
+                    let (seconds, nanos) = ts.to_unix();
+                    seconds * 1_000 + u64::from(nanos / 1_000_000)
+                })
+                .unwrap();
+
+            if v7_time > prev_time {
+                //println!("- should be next ms!");
+                println!(
+                    "prev ms boundary = {} | {}",
+                    prev_ms_boundary.as_hyphenated(),
+                    prev_ms_boundary.as_u128()
+                );
+                println!(
+                    "curr_ms_boundary = {} | {}",
+                    v7.as_hyphenated(),
+                    v7.as_u128()
+                );
+
+                let is_monotonic_across_ms_bounds = v7 > prev_ms_boundary;
+                println!("    curr > prev? {is_monotonic_across_ms_bounds}",);
+                println!("    there were {num_ids_created_in_same_ms} ids created in this ms");
+                println!("    were they all monotonic? {is_sub_ms_monotonic}");
+                assert!(
+                    v7 > prev_ms_boundary,
+                    "ms monotonicity is a requirement of v7!"
+                );
+
+                num_ids_created_in_same_ms = 0;
+                is_sub_ms_monotonic = true;
+
+                if !is_monotonic_across_ms_bounds {
+                    println!("{}", "*".repeat(100));
+                }
+
+                println!();
+                prev_ms_boundary = v7;
+            } else if v7_time == prev_time {
+                num_ids_created_in_same_ms += 1;
+                // if we found a non mono sub-ms dont overwrite it.
+                if is_sub_ms_monotonic {
+                    is_sub_ms_monotonic = prev < v7;
+                }
             } else {
                 println!("\n\nTIME WENT BACKWARDS! \n\n");
             }
