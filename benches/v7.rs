@@ -75,7 +75,7 @@ where
     F: Fn() -> u128 + Send + Sync + 'static,
 {
     #[cfg(not(feature = "v7-global-monotonicity"))]
-    let mut concurrent_thread_counts = vec![2, 4, 8, 12, 16, 24, 32, 64];
+    let mut concurrent_thread_counts = vec![1, 2, 4, 8, 12, 16, 24, 32, 64];
 
     #[cfg(feature = "v7-global-monotonicity")]
     let mut concurrent_thread_counts = vec![8, 16, 32, 64];

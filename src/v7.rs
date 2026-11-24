@@ -77,17 +77,12 @@ use crate::VARIANT_SHIFT;
 use crate::VERSION_SHIFT;
 use crate::builder;
 use crate::builder::Version7;
-use crate::timestamp::UnixTimestamp;
-use crate::timestamp::nanos_as_millis_saturating;
+use crate::timestamp::{UnixTimestamp, nanos_as_millis_saturating, nanos_to_parts, parts_to_nanos};
 use rand::RngExt;
-use rand::distr::Distribution;
-use rand::distr::StandardUniform;
-use std::cell::RefCell;
-use std::cell::RefMut;
-use std::ops::Deref;
-use std::ops::DerefMut;
-use std::sync::Mutex;
-use std::sync::MutexGuard;
+use rand::distr::{Distribution, StandardUniform};
+use std::cell::{RefCell, RefMut};
+use std::ops::{Deref, DerefMut};
+use std::sync::{Mutex, MutexGuard};
 
 const RANDOM_A_BITS: u32 = 12;
 const RANDOM_B_HIGH_BITS: u32 = 30;
@@ -150,7 +145,7 @@ fn generate_timestamp_sequence(
     options: &Version7,
     context: &mut ContextGuard,
 ) -> (u64, u64, u32) {
-    let curr_unix_nanos = crate::timestamp::parts_to_nanos(seconds, subsec_nanos);
+    let curr_unix_nanos = parts_to_nanos(seconds, subsec_nanos);
     let prev_timestamp = context.timestamp;
     let prev_nanos = prev_timestamp.as_nanos();
 
@@ -171,7 +166,7 @@ fn generate_timestamp_sequence(
 
         // If the counter overflowed, increment timestamp by 1ms.
         if next > COUNTER_MAX {
-            increment_unix_nanos_by_millis(&mut next_timestamp, 1);
+            increment_timestamp_by_millis(&mut next_timestamp, 1);
             next = reseed_counter(next_timestamp, options.crypto, &precision_params);
 
             // If the timestamp overflowed as well, rethink ur threading strategy!
@@ -187,10 +182,11 @@ fn generate_timestamp_sequence(
         get_entropy::<u64>(options.crypto) & RESEED_MASK
     };
 
-    let (next_secs, next_subsec_nanos) = crate::timestamp::nanos_to_parts(next_timestamp);
+    let (next_secs, next_subsec_nanos) = nanos_to_parts(next_timestamp);
     (next_counter, next_secs, next_subsec_nanos)
 }
 
+#[inline]
 fn increment_counter(
     counter: u64,
     next_timestamp: u128,
@@ -201,12 +197,14 @@ fn increment_counter(
     std::cmp::max(next, next_with_precision)
 }
 
-fn increment_unix_nanos_by_millis(unix_nanos: &mut u128, millis: u32) {
+#[inline]
+fn increment_timestamp_by_millis(unix_nanos: &mut u128, millis: u32) {
     let millis_as_nanos =
         (millis as u128).saturating_mul(UnixTimestamp::NANOSECONDS_PER_MILLISECOND);
     *unix_nanos = unix_nanos.saturating_add(millis_as_nanos);
 }
 
+#[inline]
 fn reseed_counter(
     next_timestamp: u128,
     is_crypto: bool,
@@ -216,15 +214,19 @@ fn reseed_counter(
     apply_precision(reseeded_counter, next_timestamp, precision_params)
 }
 
-fn apply_precision(counter: u64, next_timestamp: u128, params: &PrecisionParameters) -> u64 {
+const fn apply_precision(counter: u64, next_timestamp: u128, params: &PrecisionParameters) -> u64 {
     if params.bits == 0 {
         return counter;
     }
-    let additional = ((next_timestamp % 1_000_000) * (1u128 << params.bits)) / 1_000_000;
+
+    let additional = ((next_timestamp % UnixTimestamp::NANOSECONDS_PER_MILLISECOND)
+        * (1u128 << params.bits))
+        / UnixTimestamp::NANOSECONDS_PER_MILLISECOND;
+
     (counter & params.mask) | ((additional as u64) << params.shift)
 }
 
-fn calculate_precision_parameters(is_additional_precision: bool) -> PrecisionParameters {
+const fn calculate_precision_parameters(is_additional_precision: bool) -> PrecisionParameters {
     let bits = if is_additional_precision {
         RANDOM_A_BITS as usize
     } else {
