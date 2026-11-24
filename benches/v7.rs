@@ -8,33 +8,48 @@ use std::{
     time::{Duration, Instant},
 };
 #[allow(unused_imports)]
-use uuid::Uuid;
+use uuid::Uuid as UuidExtern;
 
 const RANDOM_SPACE: f64 = (1 << 20) as f64;
 
 fn main() {
-    #[cfg(not(feature = "v7-global-monotonicity"))]
-    {
-        println!("\n\n\nRUNNING GWID (generate_strict_raw(), NOT v7-global-monotonicity)\n");
-        run_benchmark_concurrent_multi_threaded_throughput(|| {
-            gwid::v7::generate_strict_raw().unwrap()
-        });
-        // run_concurrent_multi_threaded_collision_distribution(|| gwid::v7::generate_raw().unwrap());
-    }
+    println!("\n\n\nRUNNING GWID (global, strict, crypto)\n");
+    run_benchmark_concurrent_multi_threaded_throughput(|| {
+        gwid::UuidBuilder::version7()
+            .strict()
+            .global()
+            .crypto()
+            .build()
+            .as_u128()
+    });
+    // run_concurrent_multi_threaded_collision_distribution(|| gwid::v7::generate_raw().unwrap());
 
-    #[cfg(not(feature = "v7-global-monotonicity"))]
-    {
-        println!("\n\n\nRUNNING GWID (generate_raw(), NOT v7-global-monotonicity)\n");
-        run_benchmark_concurrent_multi_threaded_throughput(|| gwid::v7::generate_raw().unwrap());
-        // run_concurrent_multi_threaded_collision_distribution(|| gwid::v7::generate_raw().unwrap());
-    }
+    println!("\n\n\nRUNNING GWID (global, strict)\n");
+    run_benchmark_concurrent_multi_threaded_throughput(|| {
+        gwid::UuidBuilder::version7()
+            .strict()
+            .global()
+            .build()
+            .as_u128()
+    });
+
+    println!("\n\n\nRUNNING GWID (thread-local strict [non-global])\n");
+    run_benchmark_concurrent_multi_threaded_throughput(|| {
+        gwid::UuidBuilder::version7().strict().build().as_u128()
+    });
+
+    println!("\n\n\nRUNNING GWID (no builder options [non-strict, non-global])\n");
+    run_benchmark_concurrent_multi_threaded_throughput(|| {
+        gwid::UuidBuilder::version7().build().as_u128()
+    });
+    // run_concurrent_multi_threaded_collision_distribution(|| gwid::v7::generate_raw().unwrap());
 
     // ------------------------------------------------------------------------------------------
     // TO COMPARE AGAINST THE `uuid` CRATE
     // ------------------------------------------------------------------------------------------
     //
-    println!("\n\n\nRUNNING UUID\n");
-    run_benchmark_concurrent_multi_threaded_throughput(|| Uuid::now_v7().as_u128());
+    // println!("\n\n\nRUNNING UUID\n");
+    // run_benchmark_concurrent_multi_threaded_throughput(|| UuidExtern::now_v7().as_u128());
     // run_concurrent_multi_threaded_collision_distribution(|| Uuid::now_v7().as_u128());
     //
     // ------------------------------------------------------------------------------------------

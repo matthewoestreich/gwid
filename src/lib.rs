@@ -151,14 +151,16 @@
 //!
 //! [RFC 9562](https://www.rfc-editor.org/rfc/rfc9562/) does not require UUIDv7 random bits to be cryptographically secure, but we give you the option.
 
-pub mod builder;
 pub mod error;
 pub mod timestamp;
 pub mod v1;
 pub mod v4;
 pub mod v7;
 
+pub(crate) mod builder;
 pub(crate) mod rand;
+
+pub use builder::UuidBuilder;
 
 use crate::error::GwidError;
 
