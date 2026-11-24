@@ -21,13 +21,15 @@ pub struct UnixTimestamp(pub(crate) u128);
 impl UnixTimestamp {
     /// Maximum number of nanoseconds that can be represented when storing seconds
     /// as `u64` and subsecond nanoseconds as `u32`.
-    const MAX_REPRESENTABLE_NANOSECONDS: u128 = 18_446_744_073_709_551_619_294_967_295;
+    pub const MAX_REPRESENTABLE_NANOSECONDS: u128 = 18_446_744_073_709_551_619_294_967_295;
     /// Max milliseconds represented in nanoseconds.
-    const MAX_MILLIS_EXPRESSED_AS_NANOS: u128 = 18_446_744_073_709_551_615_999_999;
+    pub const MAX_MILLIS_EXPRESSED_AS_NANOS: u128 = 18_446_744_073_709_551_615_999_999;
     /// Number of nanoseconds in a second.
-    const NANOSECONDS_PER_SECOND: u128 = 1_000_000_000;
+    pub const NANOSECONDS_PER_SECOND: u128 = 1_000_000_000;
+    /// Number of nanoseconds in a millisecond.
+    pub const NANOSECONDS_PER_MILLISECOND: u128 = 1_000_000;
 
-    const MAX: Self = Self::from_nanos(Self::MAX_REPRESENTABLE_NANOSECONDS);
+    pub const MAX: Self = Self::from_nanos(Self::MAX_REPRESENTABLE_NANOSECONDS);
 
     /// Current unix time in nanoseconds.
     ///

@@ -94,6 +94,7 @@ const RANDOM_B_HIGH_BITS: u32 = 30;
 const TIMESTAMP_BITS: u32 = 48;
 const COUNTER_BITS: u32 = RANDOM_A_BITS + RANDOM_B_HIGH_BITS;
 const COUNTER_LOW_MASK: u64 = (1u64 << RANDOM_B_HIGH_BITS) - 1;
+const COUNTER_MAX: u64 = (1u64 << COUNTER_BITS) - 1;
 const RESEED_MASK: u64 = (1u64 << (COUNTER_BITS - 1)) - 1;
 const TIMESTAMP_MAX: u64 = (1 << TIMESTAMP_BITS) - 1;
 const TIMESTAMP_SHIFT: u32 = 80;
@@ -154,32 +155,68 @@ fn generate_timestamp_sequence(
     let prev_nanos = prev_timestamp.as_nanos();
 
     // Enforce nondecreasing time.
-    // prev_timestamp.advance(curr_unix_nanos)
-    let next_timestamp = curr_unix_nanos.max(prev_nanos);
+    let mut next_timestamp = curr_unix_nanos.max(prev_nanos);
 
-    // check if ms changed
     let prev_millis = nanos_as_millis_saturating(prev_nanos);
     let next_millis = nanos_as_millis_saturating(next_timestamp);
-
     let precision_params = calculate_precision_parameters(options.additional_precision);
 
+    // We are in a new ms, reseed counter.
     let next_counter = if next_millis > prev_millis {
-        let reseeded_counter = get_entropy::<u64>(options.crypto) & RESEED_MASK;
-        apply_precision(reseeded_counter, next_timestamp, precision_params)
-    } else if options.strict && next_millis == prev_millis {
-        let next = context.counter + 1;
-        let next_with_precision = apply_precision(next, next_timestamp, precision_params);
-        std::cmp::max(next, next_with_precision)
-    } else {
+        reseed_counter(next_timestamp, options.crypto, &precision_params)
+    }
+    // We are in the same ms and in strict mode, ensure monotonicity within sub-ms precision.
+    else if options.strict && next_millis == prev_millis {
+        let mut next = increment_counter(context.counter, next_timestamp, &precision_params);
+
+        // If the counter overflowed, increment timestamp by 1ms.
+        if next > COUNTER_MAX {
+            increment_unix_nanos_by_millis(&mut next_timestamp, 1);
+            next = reseed_counter(next_timestamp, options.crypto, &precision_params);
+
+            // If the timestamp overflowed as well, rethink ur threading strategy!
+            if next_timestamp > TIMESTAMP_MAX as u128 {
+                panic!("both counter and timestamp overflow. rethink your threading strategy!");
+            }
+        }
+
+        next
+    }
+    // We are in the same ms but not in strict mode (do not need sub-ms monotonicity), generate new random bits.
+    else {
         get_entropy::<u64>(options.crypto) & RESEED_MASK
     };
 
     let (next_secs, next_subsec_nanos) = crate::timestamp::nanos_to_parts(next_timestamp);
-
     (next_counter, next_secs, next_subsec_nanos)
 }
 
-fn apply_precision(counter: u64, next_timestamp: u128, params: PrecisionParameters) -> u64 {
+fn increment_counter(
+    counter: u64,
+    next_timestamp: u128,
+    precision_params: &PrecisionParameters,
+) -> u64 {
+    let next = counter + 1;
+    let next_with_precision = apply_precision(next, next_timestamp, precision_params);
+    std::cmp::max(next, next_with_precision)
+}
+
+fn increment_unix_nanos_by_millis(unix_nanos: &mut u128, millis: u32) {
+    let millis_as_nanos =
+        (millis as u128).saturating_mul(UnixTimestamp::NANOSECONDS_PER_MILLISECOND);
+    *unix_nanos = unix_nanos.saturating_add(millis_as_nanos);
+}
+
+fn reseed_counter(
+    next_timestamp: u128,
+    is_crypto: bool,
+    precision_params: &PrecisionParameters,
+) -> u64 {
+    let reseeded_counter = get_entropy::<u64>(is_crypto) & RESEED_MASK;
+    apply_precision(reseeded_counter, next_timestamp, precision_params)
+}
+
+fn apply_precision(counter: u64, next_timestamp: u128, params: &PrecisionParameters) -> u64 {
     if params.bits == 0 {
         return counter;
     }
@@ -215,6 +252,7 @@ where
     }
 }
 
+#[derive(Debug, Clone, Copy)]
 struct PrecisionParameters {
     bits: usize,
     mask: u64,
@@ -323,6 +361,36 @@ mod test {
             let v7 = UuidBuilder::version7().build();
             println!("{}", v7.as_hex());
             // println!();
+        }
+    }
+
+    #[test]
+    fn ensure_thread_local_monotonicity_when_multithreading() {
+        const NUM_THREADS: usize = 12;
+        const NUM_IDS_PER_THREAD: usize = 500_000;
+
+        let mut handles = Vec::with_capacity(NUM_THREADS);
+
+        for _ in 0..NUM_THREADS {
+            handles.push(thread::spawn(move || {
+                let mut ids = Vec::with_capacity(NUM_IDS_PER_THREAD);
+
+                for _ in 0..NUM_IDS_PER_THREAD {
+                    ids.push(UuidBuilder::version7().strict().build());
+                }
+
+                ids
+            }))
+        }
+
+        for handle in handles {
+            let results = handle.join().expect("failed to join handle");
+
+            let mut prev = Uuid::zero();
+            for id in results {
+                assert!(prev < id);
+                prev = id;
+            }
         }
     }
 
