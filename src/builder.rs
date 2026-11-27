@@ -1,17 +1,27 @@
-use crate::UUID_BYTES;
 use crate::Uuid;
 use crate::timestamp::UnixTimestamp;
+
+mod private {
+    pub trait Sealed {}
+}
+
+pub trait UuidRfcVersion: private::Sealed {}
 
 pub struct Version1 {
     pub(crate) something: String,
 }
 
+impl private::Sealed for Version1 {}
+impl UuidRfcVersion for Version1 {}
+
 pub struct Version4 {
     pub(crate) something: u32,
 }
 
+impl private::Sealed for Version4 {}
+impl UuidRfcVersion for Version4 {}
+
 pub struct Version7 {
-    // Ensures all **thread-local** IDs are strictly monotonic.
     pub(crate) strict: bool,
     pub(crate) additional_precision: bool,
     pub(crate) crypto: bool,
@@ -19,7 +29,12 @@ pub struct Version7 {
     pub(crate) global: bool,
 }
 
-pub struct UuidBuilder<T>(T);
+impl private::Sealed for Version7 {}
+impl UuidRfcVersion for Version7 {}
+
+pub struct UuidBuilder<T>(T)
+where
+    T: UuidRfcVersion;
 
 impl UuidBuilder<Version1> {
     pub fn version1() -> Self {

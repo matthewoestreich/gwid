@@ -152,6 +152,7 @@
 //! [RFC 9562](https://www.rfc-editor.org/rfc/rfc9562/) does not require UUIDv7 random bits to be cryptographically secure, but we give you the option.
 
 pub mod error;
+pub mod time;
 pub mod timestamp;
 pub mod v1;
 pub mod v4;

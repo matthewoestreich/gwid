@@ -77,7 +77,8 @@ use crate::VARIANT_SHIFT;
 use crate::VERSION_SHIFT;
 use crate::builder;
 use crate::builder::Version7;
-use crate::timestamp::{UnixTimestamp, nanos_as_millis_saturating, nanos_to_parts, parts_to_nanos};
+use crate::time;
+use crate::timestamp::UnixTimestamp;
 use rand::RngExt;
 use rand::distr::{Distribution, StandardUniform};
 use std::cell::{RefCell, RefMut};
@@ -145,23 +146,20 @@ fn generate_timestamp_sequence(
     options: &Version7,
     context: &mut ContextGuard,
 ) -> (u64, u64, u32) {
-    let curr_unix_nanos = parts_to_nanos(seconds, subsec_nanos);
+    let curr_unix_nanos = time::parts_to_nanos(seconds, subsec_nanos);
     let prev_timestamp = context.timestamp;
     let prev_nanos = prev_timestamp.as_nanos();
 
     // Enforce nondecreasing time.
     let mut next_timestamp = curr_unix_nanos.max(prev_nanos);
 
-    let prev_millis = nanos_as_millis_saturating(prev_nanos);
-    let next_millis = nanos_as_millis_saturating(next_timestamp);
+    let prev_millis = time::nanos_as_millis_saturating(prev_nanos);
+    let next_millis = time::nanos_as_millis_saturating(next_timestamp);
     let precision_params = calculate_precision_parameters(options.additional_precision);
 
-    // We are in a new ms, reseed counter.
     let next_counter = if next_millis > prev_millis {
         reseed_counter(next_timestamp, options.crypto, &precision_params)
-    }
-    // We are in the same ms and in strict mode, ensure monotonicity within sub-ms precision.
-    else if options.strict && next_millis == prev_millis {
+    } else if options.strict && next_millis == prev_millis {
         let mut next = increment_counter(context.counter, next_timestamp, &precision_params);
 
         // If the counter overflowed, increment timestamp by 1ms.
@@ -176,13 +174,12 @@ fn generate_timestamp_sequence(
         }
 
         next
-    }
-    // We are in the same ms but not in strict mode (do not need sub-ms monotonicity), generate new random bits.
-    else {
+    } else {
         get_entropy::<u64>(options.crypto) & RESEED_MASK
     };
 
-    let (next_secs, next_subsec_nanos) = nanos_to_parts(next_timestamp);
+    let (next_secs, next_subsec_nanos) = time::nanos_to_parts(next_timestamp);
+
     (next_counter, next_secs, next_subsec_nanos)
 }
 
@@ -194,13 +191,14 @@ fn increment_counter(
 ) -> u64 {
     let next = counter + 1;
     let next_with_precision = apply_precision(next, next_timestamp, precision_params);
+
     std::cmp::max(next, next_with_precision)
 }
 
 #[inline]
 fn increment_timestamp_by_millis(unix_nanos: &mut u128, millis: u32) {
-    let millis_as_nanos =
-        (millis as u128).saturating_mul(UnixTimestamp::NANOSECONDS_PER_MILLISECOND);
+    let millis_as_nanos = (millis as u128).saturating_mul(time::NANOSECONDS_PER_MILLISECOND);
+
     *unix_nanos = unix_nanos.saturating_add(millis_as_nanos);
 }
 
@@ -211,6 +209,7 @@ fn reseed_counter(
     precision_params: &PrecisionParameters,
 ) -> u64 {
     let reseeded_counter = get_entropy::<u64>(is_crypto) & RESEED_MASK;
+
     apply_precision(reseeded_counter, next_timestamp, precision_params)
 }
 
@@ -219,9 +218,9 @@ const fn apply_precision(counter: u64, next_timestamp: u128, params: &PrecisionP
         return counter;
     }
 
-    let additional = ((next_timestamp % UnixTimestamp::NANOSECONDS_PER_MILLISECOND)
+    let additional = ((next_timestamp % time::NANOSECONDS_PER_MILLISECOND)
         * (1u128 << params.bits))
-        / UnixTimestamp::NANOSECONDS_PER_MILLISECOND;
+        / time::NANOSECONDS_PER_MILLISECOND;
 
     (counter & params.mask) | ((additional as u64) << params.shift)
 }
@@ -328,7 +327,7 @@ fn get_context(scope: ContextV7Scope) -> ContextGuard<'static> {
 mod test {
     use super::*;
     use crate::{builder::UuidBuilder, print_bits, timestamp::UnixTimestamp};
-    use std::thread;
+    use std::{thread, time::Duration};
 
     /*
     #[test]
@@ -364,6 +363,40 @@ mod test {
             println!("{}", v7.as_hex());
             // println!();
         }
+    }
+
+    #[test]
+    fn uuid_crate_custom() {
+        const RANDOM_A_BITS: u8 = 12;
+        const RANDOM_B_BITS: u8 = 62;
+        const TIMESTAMP_BITS: u8 = 48;
+        const RANDOM_A_TOTAL_VALUES: u16 = 1 << RANDOM_A_BITS;
+        /// 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000111111111111
+        const RANDOM_A_MAX: u16 = RANDOM_A_TOTAL_VALUES - 1;
+        /// 00000000000000000000000000000000000000000000000000000000000000000011111111111111111111111111111111111111111111111111111111111111
+        const RANDOM_B_MAX: u64 = (1 << RANDOM_B_BITS) - 1;
+        /// 00000000000000000000000000000000000000000000000000000000000000000000000000000000111111111111111111111111111111111111111111111111
+        const TIMESTAMP_MAX: u64 = (1 << TIMESTAMP_BITS) - 1;
+        const TIMESTAMP_SHIFT: u8 = 80;
+        const RANDOM_A_SHIFT: u128 = 64;
+        const VERSION: u8 = 7; // 0b111
+        const VARIANT: u8 = 2; // 0b10
+        struct MyContext;
+
+        impl uuid::ClockSequence for MyContext {
+            type Output = u128;
+
+            fn generate_sequence(&self, seconds: u64, subsec_nanos: u32) -> Self::Output {
+                let ts = Duration::new(seconds, subsec_nanos);
+                let sub_ms_nanos = ts.subsec_nanos() % 1_000_000;
+                let random_a = ((4096_u64 * sub_ms_nanos as u64) / 1_000_000) as u16;
+
+                0
+            }
+        }
+
+        let u = uuid::Uuid::new_v7(uuid::Timestamp::now(MyContext));
+        println!("{}", u.hyphenated());
     }
 
     #[test]

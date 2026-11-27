@@ -1,35 +1,15 @@
-// It has been 14,014,252,440 seconds since October 15, 1582, at 00:00:00 UTC (the start
-// of the Gregorian calendar reform / UUIDv1 epoch), calculated up to November 17, 2026, at 23:54:00 UTC.
-
 use crate::error::GwidError;
+use crate::time;
 use std::time::Duration;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
-const NUMBER_OF_100_NANOSECOND_TICKS_PER_SECOND: u64 = 10_000_000;
-// Seconds between 1582-10-15 00:00:00 UTC and 1970-01-01 00:00:00 UTC
-const GREGORIAN_TO_UNIX_SECS: u64 = 12_219_292_800;
-// In 100-nanosecond ticks (common in UUID v1/v6 and Windows FILETIME math)
-const GREGORIAN_TO_UNIX_OFFSET_IN_100_NANOSECOND_TICKS: u64 = 122_192_928_000_000_000;
-
-const SIXTY_BITS_MASK: u64 = (1 << 60) - 1;
-
 /// Already accounts for UNIX_EPOCH.
-#[derive(Debug, Default, Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Debug, Default, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct UnixTimestamp(pub(crate) u128);
 
 impl UnixTimestamp {
-    /// Maximum number of nanoseconds that can be represented when storing seconds
-    /// as `u64` and subsecond nanoseconds as `u32`.
-    pub const MAX_REPRESENTABLE_NANOSECONDS: u128 = 18_446_744_073_709_551_619_294_967_295;
-    /// Max milliseconds represented in nanoseconds.
-    pub const MAX_MILLIS_EXPRESSED_AS_NANOS: u128 = 18_446_744_073_709_551_615_999_999;
-    /// Number of nanoseconds in a second.
-    pub const NANOSECONDS_PER_SECOND: u128 = 1_000_000_000;
-    /// Number of nanoseconds in a millisecond.
-    pub const NANOSECONDS_PER_MILLISECOND: u128 = 1_000_000;
-
-    pub const MAX: Self = Self::from_nanos(Self::MAX_REPRESENTABLE_NANOSECONDS);
+    pub const MAX: Self = Self::from_nanos(time::MAX_REPRESENTABLE_NANOSECONDS);
 
     /// Current unix time in nanoseconds.
     ///
@@ -60,7 +40,7 @@ impl UnixTimestamp {
 
     /// Already accounts for UNIX_EPOCH.
     pub const fn from_parts(seconds: u64, subsec_nanos: u32) -> Self {
-        let unix_nanos = parts_to_nanos(seconds, subsec_nanos);
+        let unix_nanos = time::parts_to_nanos(seconds, subsec_nanos);
         Self(unix_nanos)
     }
 
@@ -71,20 +51,15 @@ impl UnixTimestamp {
     }
 
     pub fn as_millis_saturating(&self) -> u64 {
-        (self.as_nanos_clamped_to_u64_millis() / 1_000_000) as u64
+        (time::nanos_clamped_to_u64_millis(self.0) / 1_000_000) as u64
     }
 
     /// Timestamp to seconds and subsec_nanos.
-    pub fn to_parts(&self) -> (u64, u32) {
-        nanos_to_parts(self.0)
+    pub const fn to_parts(&self) -> (u64, u32) {
+        time::nanos_to_parts(self.0)
     }
 
-    /// Timestamp is clamped to max number of millis (as u64), but in nanosecond precision (u128).
-    pub fn as_nanos_clamped_to_u64_millis(&self) -> u128 {
-        nanos_clamped_to_u64_millis(self.0)
-    }
-
-    pub fn submillisecond_precision(&self) -> u16 {
+    pub const fn submillisecond_precision(&self) -> u16 {
         let submillis = self.0 % 1_000_000;
         ((submillis << 12) / 1_000_000) as u16
     }
@@ -124,47 +99,12 @@ impl From<SystemTime> for UnixTimestamp {
     }
 }
 
-pub fn nanos_clamped_to_u64_millis(nanos: u128) -> u128 {
-    nanos.min(UnixTimestamp::MAX_MILLIS_EXPRESSED_AS_NANOS)
-}
-
-pub fn nanos_as_millis_saturating(nanos: u128) -> u64 {
-    (nanos_clamped_to_u64_millis(nanos) / 1_000_000) as u64
-}
-
-/// Nanoseconds to seconds and subbsecond nanoseconds.
-pub const fn nanos_to_parts(nanos: u128) -> (u64, u32) {
-    if nanos > UnixTimestamp::MAX_REPRESENTABLE_NANOSECONDS {
-        return (u64::MAX, u32::MAX);
-    }
-
-    let secs = nanos_to_secs(nanos);
-
-    if secs > u64::MAX as u128 {
-        const MAX_NANOSECONDS_CARRY: u128 =
-            u64::MAX as u128 * UnixTimestamp::NANOSECONDS_PER_SECOND;
-
-        (u64::MAX, (nanos - MAX_NANOSECONDS_CARRY) as u32)
-    } else {
-        (secs as u64, (nanos % 1_000_000_000) as u32)
-    }
-}
-
-/// Nanoseconds to seconds.
-const fn nanos_to_secs(nanos: u128) -> u128 {
-    nanos / 1_000_000_000
-}
-
-pub const fn parts_to_nanos(seconds: u64, subsec_nanos: u32) -> u128 {
-    (seconds as u128 * 1_000_000_000) + subsec_nanos as u128
-}
-
 // ------------------------------------------------------------------------------------------------------------------------------------
 // OLD STUFF BELOW
 // ------------------------------------------------------------------------------------------------------------------------------------
 
 fn gregorian_epoch() -> SystemTime {
-    UNIX_EPOCH - Duration::from_secs(GREGORIAN_TO_UNIX_SECS)
+    UNIX_EPOCH - Duration::from_secs(time::GREGORIAN_TO_UNIX_SECS)
 }
 
 fn current_gregorian_ticks() -> u64 {
@@ -175,13 +115,13 @@ fn current_gregorian_ticks() -> u64 {
     // Convert seconds and nanoseconds into 100-nanosecond ticks
     let unix_ticks = duration.as_secs() * 10_000_000 + (duration.subsec_nanos() as u64) / 100;
 
-    unix_ticks + GREGORIAN_TO_UNIX_OFFSET_IN_100_NANOSECOND_TICKS
+    unix_ticks + time::GREGORIAN_TO_UNIX_OFFSET_IN_100_NANOSECOND_TICKS
 }
 
 pub fn gregorian_now() -> u128 {
     let duration = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
 
-    duration.as_nanos() / 100 + GREGORIAN_TO_UNIX_OFFSET_IN_100_NANOSECOND_TICKS as u128
+    duration.as_nanos() / 100 + time::GREGORIAN_TO_UNIX_OFFSET_IN_100_NANOSECOND_TICKS as u128
 }
 
 #[cfg(test)]
@@ -223,6 +163,8 @@ mod test {
 
     #[test]
     fn timestamp_foo() {
+        const SIXTY_BITS_MASK: u64 = (1 << 60) - 1;
+
         let unix_ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
         let unix_ts_secs = unix_ts.as_secs();
         let unix_ts_ms = unix_ts.as_millis();
@@ -230,9 +172,9 @@ mod test {
         let unix_ts_subsec_millis = unix_ts.subsec_millis();
 
         let unix_ts_secs_as_gregorian_ticks =
-            (unix_ts_secs * NUMBER_OF_100_NANOSECOND_TICKS_PER_SECOND);
-        let gregorian_timestamp_raw =
-            unix_ts_secs_as_gregorian_ticks + GREGORIAN_TO_UNIX_OFFSET_IN_100_NANOSECOND_TICKS;
+            (unix_ts_secs * time::NUMBER_OF_100_NANOSECOND_TICKS_PER_SECOND);
+        let gregorian_timestamp_raw = unix_ts_secs_as_gregorian_ticks
+            + time::GREGORIAN_TO_UNIX_OFFSET_IN_100_NANOSECOND_TICKS;
         let gregorian_timestamp = gregorian_timestamp_raw & SIXTY_BITS_MASK;
 
         const GREGORIAN_OFFSET: u128 = 122_192_928_000_000_000;
@@ -256,7 +198,7 @@ mod test {
         println!("mine    = {mine_greg_secs} unix = {mine_greg_as_unix_nanos}");
 
         let theirs_greg = Duration::from_secs(
-            current_gregorian_ticks() / NUMBER_OF_100_NANOSECOND_TICKS_PER_SECOND,
+            current_gregorian_ticks() / time::NUMBER_OF_100_NANOSECOND_TICKS_PER_SECOND,
         );
         let theirs_greg_secs = theirs_greg.as_secs();
         let theirs_greg_as_unix = SystemTime::now()
