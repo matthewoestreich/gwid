@@ -55,7 +55,7 @@
 //
 // ## Crypto :
 //      - If enabled, use crypto secure randomness
-//      - If disabled, use MathRandom
+//      - If disabled, use MathRandom (xorshift128 implementation)
 //
 // ## Global :
 //      - If enabled, uses shared context (coontext wrapped in Mutex)
@@ -86,16 +86,14 @@ use std::ops::{Deref, DerefMut};
 use std::sync::{Mutex, MutexGuard};
 
 const RANDOM_A_BITS: u32 = 12;
-const RANDOM_B_HIGH_BITS: u32 = 30;
+const RANDOM_B_BITS: u32 = 62;
 const TIMESTAMP_BITS: u32 = 48;
-const COUNTER_BITS: u32 = RANDOM_A_BITS + RANDOM_B_HIGH_BITS;
-const COUNTER_LOW_MASK: u64 = (1u64 << RANDOM_B_HIGH_BITS) - 1;
-const COUNTER_MAX: u64 = (1u64 << COUNTER_BITS) - 1;
-const RESEED_MASK: u64 = (1u64 << (COUNTER_BITS - 1)) - 1;
-const TIMESTAMP_MAX: u64 = (1 << TIMESTAMP_BITS) - 1;
+const RANDOM_A_MAX: u16 = 1 << RANDOM_A_BITS;
+const RANDOM_A_MASK: u16 = RANDOM_A_MAX - 1;
+const RANDOM_B_MASK: u64 = (1 << RANDOM_B_BITS) - 1;
+const TIMESTAMP_MASK: u64 = (1 << TIMESTAMP_BITS) - 1;
 const TIMESTAMP_SHIFT: u32 = 80;
 const RANDOM_A_SHIFT: u32 = 64;
-const COUNTER_SHIFT: u32 = 32;
 const VERSION: u128 = 7;
 const VARIANT: u128 = 2;
 
@@ -123,7 +121,7 @@ impl From<builder::Version7> for Uuid {
         context.timestamp = next_timestamp;
         context.counter = counter;
 
-        let timestamp_millis = (next_timestamp.as_millis_saturating() & TIMESTAMP_MAX) as u128;
+        let timestamp_millis = (next_timestamp.as_millis_saturating() & TIMESTAMP_MASK) as u128;
         let random_a = (counter >> RANDOM_B_HIGH_BITS) as u128;
         let counter = (counter & COUNTER_LOW_MASK) as u128;
         let random_b = get_entropy::<u32>(options.crypto) as u128;
@@ -168,7 +166,7 @@ fn generate_timestamp_sequence(
             next = reseed_counter(next_timestamp, options.crypto, &precision_params);
 
             // If the timestamp overflowed as well, rethink ur threading strategy!
-            if next_timestamp > TIMESTAMP_MAX as u128 {
+            if next_timestamp > TIMESTAMP_MASK as u128 {
                 panic!("both counter and timestamp overflow. rethink your threading strategy!");
             }
         }
@@ -261,16 +259,31 @@ struct PrecisionParameters {
 }
 
 #[derive(Default, Debug)]
-struct ContextV7 {
-    pub timestamp: UnixTimestamp,
-    pub counter: u64,
+struct ContextV7Unpacked {
+    /// Only uses bottom 48 bits.
+    unix_ts_ms: u64,
+    /// Only uses bottom 12 bits.
+    rand_a: u16,
+    /// Only uses bottom 62 bits.
+    rand_b: u64,
 }
+
+#[derive(Default, Debug)]
+struct ContextV7(pub(crate) u128);
 
 impl ContextV7 {
     pub const fn new() -> Self {
-        Self {
-            timestamp: UnixTimestamp(0),
-            counter: 0,
+        Self(0)
+    }
+
+    pub fn unpack(&mut self, scope: ContextV7Scope) -> ContextV7Unpacked {
+        let ctx = get_context(scope);
+        let value = ctx.0;
+
+        ContextV7Unpacked {
+            unix_ts_ms: (value >> (RANDOM_A_BITS + RANDOM_B_BITS)) as u64,
+            rand_a: ((value >> RANDOM_B_BITS) & RANDOM_A_MAX as u128) as u16,
+            rand_b: (value & RANDOM_B_MASK as u128) as u64,
         }
     }
 }
