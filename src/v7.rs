@@ -72,13 +72,14 @@
 //
 // ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
+use crate::CLEAR_VARIANT_MASK;
+use crate::CLEAR_VERSION_MASK;
 use crate::Uuid;
 use crate::VARIANT_SHIFT;
 use crate::VERSION_SHIFT;
 use crate::builder;
 use crate::builder::Version7;
 use crate::time;
-use crate::timestamp::UnixTimestamp;
 use rand::RngExt;
 use rand::distr::{Distribution, StandardUniform};
 use std::cell::{RefCell, RefMut};
@@ -107,136 +108,80 @@ impl From<builder::Version7> for Uuid {
     fn from(options: builder::Version7) -> Self {
         let (seconds, subsec_nanos) = options.timestamp.to_parts();
 
-        let mut context = get_context(if options.global {
+        let mut context_guard = get_context(if options.global {
             ContextV7Scope::Global
         } else {
             ContextV7Scope::ThreadLocal
         });
 
-        let (counter, seconds, subsec_nanos) =
-            generate_timestamp_sequence(seconds, subsec_nanos, &options, &mut context);
+        let (unix_ts_ms, rand_a, rand_b) =
+            generate_timestamp_sequence(&options, &mut context_guard);
 
-        let next_timestamp = UnixTimestamp::from_parts(seconds, subsec_nanos);
-
-        context.timestamp = next_timestamp;
-        context.counter = counter;
-
-        let timestamp_millis = (next_timestamp.as_millis_saturating() & TIMESTAMP_MASK) as u128;
-        let random_a = (counter >> RANDOM_B_HIGH_BITS) as u128;
-        let counter = (counter & COUNTER_LOW_MASK) as u128;
-        let random_b = get_entropy::<u32>(options.crypto) as u128;
-
-        let raw_uuid = (timestamp_millis << TIMESTAMP_SHIFT)
+        let raw_uuid = ((unix_ts_ms as u128) << TIMESTAMP_SHIFT) & CLEAR_VERSION_MASK
             | (VERSION << VERSION_SHIFT)
-            | (random_a << RANDOM_A_SHIFT)
+            | ((rand_a as u128) << RANDOM_A_SHIFT) & CLEAR_VARIANT_MASK
             | (VARIANT << VARIANT_SHIFT)
-            | (counter << COUNTER_SHIFT)
-            | random_b;
+            | (rand_b as u128);
 
         Uuid(raw_uuid.to_be_bytes())
     }
 }
 
 /// Returns (counter_value, seconds, subsec_nanos)
-fn generate_timestamp_sequence(
-    seconds: u64,
-    subsec_nanos: u32,
-    options: &Version7,
-    context: &mut ContextGuard,
-) -> (u64, u64, u32) {
-    let curr_unix_nanos = time::parts_to_nanos(seconds, subsec_nanos);
-    let prev_timestamp = context.timestamp;
-    let prev_nanos = prev_timestamp.as_nanos();
+fn generate_timestamp_sequence(options: &Version7, context: &mut ContextGuard) -> (u64, u16, u64) {
+    let (prev_ts_ms, prev_rand_a, prev_rand_b) = unpack_context(context.0);
 
-    // Enforce nondecreasing time.
-    let mut next_timestamp = curr_unix_nanos.max(prev_nanos);
+    let curr_ts_ms = options.timestamp.as_millis_saturating();
+    let curr_ts_nanos = options.timestamp.as_nanos();
 
-    let prev_millis = time::nanos_as_millis_saturating(prev_nanos);
-    let next_millis = time::nanos_as_millis_saturating(next_timestamp);
-    let precision_params = calculate_precision_parameters(options.additional_precision);
+    // Enforce nondecreasing millisecond timestamp.
+    let mut unix_ts_ms = curr_ts_ms.max(prev_ts_ms);
 
-    let next_counter = if next_millis > prev_millis {
-        reseed_counter(next_timestamp, options.crypto, &precision_params)
-    } else if options.strict && next_millis == prev_millis {
-        let mut next = increment_counter(context.counter, next_timestamp, &precision_params);
+    // Generate initial random/precision fields.
+    let mut rand_a = if options.additional_precision {
+        derive_random_a(curr_ts_nanos) & RANDOM_A_MASK
+    } else {
+        get_entropy::<u16>(options.crypto) & RANDOM_A_MASK
+    };
 
-        // If the counter overflowed, increment timestamp by 1ms.
-        if next > COUNTER_MAX {
-            increment_timestamp_by_millis(&mut next_timestamp, 1);
-            next = reseed_counter(next_timestamp, options.crypto, &precision_params);
+    let mut rand_b = get_entropy::<u64>(options.crypto) & RANDOM_B_MASK;
 
-            // If the timestamp overflowed as well, rethink ur threading strategy!
-            if next_timestamp > TIMESTAMP_MASK as u128 {
-                panic!("both counter and timestamp overflow. rethink your threading strategy!");
+    if unix_ts_ms == prev_ts_ms {
+        if options.strict {
+            // Strict mode: rand_a is the primary counter.
+            if rand_a <= prev_rand_a {
+                if prev_rand_a < RANDOM_A_MASK {
+                    rand_a = prev_rand_a + 1;
+                } else {
+                    // rand_a exhausted: hold it and advance rand_b.
+                    rand_a = RANDOM_A_MASK;
+
+                    if prev_rand_b < RANDOM_B_MASK {
+                        rand_b = prev_rand_b + 1;
+                    } else if unix_ts_ms < TIMESTAMP_MASK {
+                        // Both random fields exhausted: advance timestamp.
+                        unix_ts_ms += 1;
+                        rand_a = 0;
+                        rand_b = 0;
+                    } else {
+                        panic!("all fields exhausted");
+                    }
+                }
             }
+        } else if options.additional_precision {
+            // Non-strict mode: preserve nondecreasing sub-ms precision.
+            rand_a = rand_a.max(prev_rand_a);
         }
-
-        next
-    } else {
-        get_entropy::<u64>(options.crypto) & RESEED_MASK
-    };
-
-    let (next_secs, next_subsec_nanos) = time::nanos_to_parts(next_timestamp);
-
-    (next_counter, next_secs, next_subsec_nanos)
-}
-
-#[inline]
-fn increment_counter(
-    counter: u64,
-    next_timestamp: u128,
-    precision_params: &PrecisionParameters,
-) -> u64 {
-    let next = counter + 1;
-    let next_with_precision = apply_precision(next, next_timestamp, precision_params);
-
-    std::cmp::max(next, next_with_precision)
-}
-
-#[inline]
-fn increment_timestamp_by_millis(unix_nanos: &mut u128, millis: u32) {
-    let millis_as_nanos = (millis as u128).saturating_mul(time::NANOSECONDS_PER_MILLISECOND);
-
-    *unix_nanos = unix_nanos.saturating_add(millis_as_nanos);
-}
-
-#[inline]
-fn reseed_counter(
-    next_timestamp: u128,
-    is_crypto: bool,
-    precision_params: &PrecisionParameters,
-) -> u64 {
-    let reseeded_counter = get_entropy::<u64>(is_crypto) & RESEED_MASK;
-
-    apply_precision(reseeded_counter, next_timestamp, precision_params)
-}
-
-const fn apply_precision(counter: u64, next_timestamp: u128, params: &PrecisionParameters) -> u64 {
-    if params.bits == 0 {
-        return counter;
     }
 
-    let additional = ((next_timestamp % time::NANOSECONDS_PER_MILLISECOND)
-        * (1u128 << params.bits))
-        / time::NANOSECONDS_PER_MILLISECOND;
+    context.0 = pack_context(unix_ts_ms, rand_a, rand_b);
 
-    (counter & params.mask) | ((additional as u64) << params.shift)
+    (unix_ts_ms, rand_a, rand_b)
 }
 
-const fn calculate_precision_parameters(is_additional_precision: bool) -> PrecisionParameters {
-    let bits = if is_additional_precision {
-        RANDOM_A_BITS as usize
-    } else {
-        0
-    };
-
-    let counter_bits_remaining = COUNTER_BITS as usize - bits;
-
-    PrecisionParameters {
-        bits,
-        mask: (1u64 << counter_bits_remaining) - 1,
-        shift: counter_bits_remaining as u32,
-    }
+fn derive_random_a(ts_ms_as_nanos: u128) -> u16 {
+    let sub_ms_nanos = ts_ms_as_nanos % time::NANOSECONDS_PER_MILLISECOND;
+    ((RANDOM_A_MAX as u128 * sub_ms_nanos) / time::NANOSECONDS_PER_MILLISECOND) as u16
 }
 
 fn get_entropy<T>(is_crypto: bool) -> T
@@ -251,21 +196,18 @@ where
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-struct PrecisionParameters {
-    bits: usize,
-    mask: u64,
-    shift: u32,
+fn unpack_context(context: u128) -> (u64, u16, u64) {
+    (
+        (context >> (RANDOM_A_BITS + RANDOM_B_BITS)) as u64,
+        ((context >> RANDOM_B_BITS) & RANDOM_A_MASK as u128) as u16,
+        (context & RANDOM_B_MASK as u128) as u64,
+    )
 }
 
-#[derive(Default, Debug)]
-struct ContextV7Unpacked {
-    /// Only uses bottom 48 bits.
-    unix_ts_ms: u64,
-    /// Only uses bottom 12 bits.
-    rand_a: u16,
-    /// Only uses bottom 62 bits.
-    rand_b: u64,
+fn pack_context(unix_ts_ms: u64, random_a: u16, random_b: u64) -> u128 {
+    (((unix_ts_ms & TIMESTAMP_MASK) as u128) << (RANDOM_A_BITS + RANDOM_B_BITS))
+        | (((random_a & RANDOM_A_MASK) as u128) << RANDOM_B_BITS)
+        | ((random_b & RANDOM_B_MASK) as u128)
 }
 
 #[derive(Default, Debug)]
@@ -274,17 +216,6 @@ struct ContextV7(pub(crate) u128);
 impl ContextV7 {
     pub const fn new() -> Self {
         Self(0)
-    }
-
-    pub fn unpack(&mut self, scope: ContextV7Scope) -> ContextV7Unpacked {
-        let ctx = get_context(scope);
-        let value = ctx.0;
-
-        ContextV7Unpacked {
-            unix_ts_ms: (value >> (RANDOM_A_BITS + RANDOM_B_BITS)) as u64,
-            rand_a: ((value >> RANDOM_B_BITS) & RANDOM_A_MAX as u128) as u16,
-            rand_b: (value & RANDOM_B_MASK as u128) as u64,
-        }
     }
 }
 
@@ -370,11 +301,48 @@ mod test {
 
     #[test]
     fn uuid_example_from_rfc() {
-        //for _ in 0..1000 {
+        let mut prev: Uuid = Uuid::zero();
+        let mut prev_ms_boundary: Uuid = Uuid::zero();
+
         loop {
             let v7 = UuidBuilder::version7().build();
+
+            if prev.get_timestamp().0 < v7.get_timestamp().0 {
+                println!(
+                    "  prev_bound = {} | new_bound = {}",
+                    prev_ms_boundary.as_hex(),
+                    v7.as_hex()
+                );
+                assert!(prev_ms_boundary < v7);
+                prev_ms_boundary = v7;
+            }
+
             println!("{}", v7.as_hex());
-            // println!();
+            prev = v7;
+        }
+    }
+
+    #[test]
+    fn strict() {
+        let mut prev: Uuid = Uuid::zero();
+        let mut prev_ms_boundary: Uuid = Uuid::zero();
+
+        loop {
+            let v7 = UuidBuilder::version7().strict().build();
+
+            if prev.get_timestamp().0 < v7.get_timestamp().0 {
+                println!(
+                    "  prev_bound = {} | new_bound = {}",
+                    prev_ms_boundary.as_hex(),
+                    v7.as_hex()
+                );
+                assert!(prev_ms_boundary < v7);
+                prev_ms_boundary = v7;
+            }
+
+            println!("{}", v7.as_hex());
+            assert!(prev < v7);
+            prev = v7;
         }
     }
 

@@ -6,7 +6,7 @@ use std::time::UNIX_EPOCH;
 
 /// Already accounts for UNIX_EPOCH.
 #[derive(Debug, Default, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
-pub struct UnixTimestamp(pub(crate) u128);
+pub struct UnixTimestamp(u128);
 
 impl UnixTimestamp {
     pub const MAX: Self = Self::from_nanos(time::MAX_REPRESENTABLE_NANOSECONDS);

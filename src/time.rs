@@ -6,6 +6,8 @@ pub const MAX_MILLIS_EXPRESSED_AS_NANOS: u128 = 18_446_744_073_709_551_615_999_9
 pub const NANOSECONDS_PER_SECOND: u128 = 1_000_000_000;
 /// Number of nanoseconds in a millisecond.
 pub const NANOSECONDS_PER_MILLISECOND: u128 = 1_000_000;
+/// Number of milliseconds per second
+pub const MILLISECONDS_PER_SECOND: u64 = 1_000;
 /// How many 100 nanosecond ticks exist in a single second.
 pub const NUMBER_OF_100_NANOSECOND_TICKS_PER_SECOND: u64 = 10_000_000;
 /// Seconds between 1582-10-15 00:00:00 UTC and 1970-01-01 00:00:00 UTC
