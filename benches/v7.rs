@@ -33,8 +33,8 @@ fn main() {
     // TO COMPARE AGAINST THE `uuid` CRATE
     // ------------------------------------------------------------------------------------------
     //
-    println!("\n\n\nRUNNING UUID\n");
-    run_benchmark_concurrent_multi_threaded_throughput(|| Uuid::now_v7().as_u128());
+    // println!("\n\n\nRUNNING UUID\n");
+    // run_benchmark_concurrent_multi_threaded_throughput(|| Uuid::now_v7().as_u128());
     // run_concurrent_multi_threaded_collision_distribution(|| Uuid::now_v7().as_u128());
     //
     // ------------------------------------------------------------------------------------------
